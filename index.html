@@ -103,7 +103,7 @@
   h2.section-title:first-child{margin-top:0;}
 
   .cards-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;}
-  @media (min-width:560px){.cards-grid{grid-template-columns:repeat(4,1fr);}}
+  @media (min-width:560px){.cards-grid{grid-template-columns:repeat(3,1fr);}}
   .stat-card{
     background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
     padding:14px 14px 12px;box-shadow:var(--shadow);
@@ -3904,12 +3904,20 @@ function computeRiepilogo(state, saldi){
   const utile = ricavi - costi;
   let cassa = 0;
   for(const code of cashAccountCodes()) cassa += (saldi[code]?.raw || 0);
-  const crediti = saldi['14.01'] ? Math.max(saldi['14.01'].raw,0) : 0;
+  // Crediti e debiti aperti: somma dei saldi positivi dei conti di crediti (Attivo) e debiti
+  // (Passivo) classificati breve/lungo termine nel Piano dei Conti (✎), conto per conto.
+  let crediti = 0, debiti = 0;
+  for(const code in saldi){
+    const p = idx[code];
+    if(!p || !p.scadenza || !p.tipo) continue;
+    if(p.tipo.startsWith('Attivo')) crediti += Math.max(saldi[code].raw, 0);
+    else if(p.tipo.startsWith('Passivo')) debiti += Math.max(-saldi[code].raw, 0);
+  }
   const attivi = activeMovimenti(state);
   const sorted = attivi.slice().sort((a,b)=> new Date(a.data) - new Date(b.data));
   const ultimo = sorted.length ? sorted[sorted.length-1].data : null;
   return {
-    cassa, ricavi, costi, utile, crediti,
+    cassa, ricavi, costi, utile, crediti, debiti,
     totAttivo, totPassivo,
     nMovimenti: attivi.length,
     ultimoMovimento: ultimo,
@@ -4056,10 +4064,11 @@ function renderRiepilogo(){
   const r = computeRiepilogo(STATE, saldi);
   renderTrendPanel();
   const cards = [
-    {label:'Cassa disponibile', value: money(r.cassa), cls:''},
-    {label:'Ricavi totali', value: money(r.ricavi), cls:'pos'},
+    {label:'Disponibilità liquide', value: money(r.cassa), cls:''},
+    {label:'Fatturato (ricavi)', value: money(r.ricavi), cls:'pos'},
     {label: r.utile>=0 ? 'Utile d’esercizio' : 'Perdita d’esercizio', value: money(Math.abs(r.utile)), cls: r.utile>=0?'pos':'neg'},
-    {label:'Crediti aperti', value: money(r.crediti), cls: r.crediti>0 ? 'neg':''},
+    {label:'Crediti aperti', value: money(r.crediti), cls: ''},
+    {label:'Debiti aperti', value: money(r.debiti), cls: r.debiti>0 ? 'neg':''},
   ];
   document.getElementById('statCards').innerHTML = cards.map(c=>`
     <div class="stat-card">
