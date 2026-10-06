@@ -233,6 +233,8 @@
 
   .subtabs{display:flex;gap:6px;margin-bottom:12px;background:var(--surface-2);padding:4px;border-radius:12px;border:1px solid var(--border);}
   .subtabs button{flex:1;border:none;background:transparent;padding:8px;border-radius:9px;font-weight:700;font-size:13.5px;color:var(--text-dim);cursor:pointer;min-height:42px;}
+  #giornaleViewTabs{flex-wrap:wrap;}
+  #giornaleViewTabs button{flex:1 1 30%;}
   .subtabs button.active{background:var(--surface);color:var(--text);box-shadow:var(--shadow);}
 
   .period-panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);padding:14px;margin-bottom:14px;}
@@ -369,10 +371,16 @@
   .lock-box .field{text-align:left;}
   .lock-error{color:var(--danger);font-size:12.5px;font-weight:700;margin-top:10px;}
 
+    .modal-back{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:500;align-items:flex-start;justify-content:center;padding:16px;overflow:auto;}
+  .modal-box{width:100%;max-width:520px;margin:auto;}
+  .tbl-amm{width:100%;border-collapse:collapse;margin-top:6px;font-size:12.5px;font-variant-numeric:tabular-nums;}
+  .tbl-amm th,.tbl-amm td{padding:5px 6px;border-bottom:1px solid var(--border);text-align:right;}
+  .tbl-amm th:first-child,.tbl-amm td:first-child{text-align:left;}
+  .tbl-amm th{color:var(--text-faint);font-weight:700;font-size:11px;}
   @media print{
     header.top nav.tabs, .btn, .btn-block, .toolbar-secondary, .searchbar, .chiprow, .subtabs,
     .form-panel, .modelli-row, .draft-banner, footer.foot .btn, #trendPanel svg + div,
-    .conto-edit-btn, .period-panel, .lock-screen{ display:none !important; }
+    .conto-edit-btn, .period-panel, .lock-screen, .modal-back{ display:none !important; }
     header.top{ position:static; backdrop-filter:none; background:none; }
     body{ background:#fff; color:#000; padding-bottom:0; }
     .panel, .stat-card, details.cat{ box-shadow:none; border:1px solid #ccc; break-inside:avoid; }
@@ -412,6 +420,7 @@
 
   <section class="view active" id="view-riepilogo">
     <div class="draft-banner" id="draftBanner" style="display:none;"></div>
+    <div id="ricorrentiBanner"></div>
     <div class="cards-grid" id="statCards"></div>
 
     <button class="btn primary btn-block" id="btnNuovaRiepilogo">＋ Nuova registrazione</button>
@@ -420,6 +429,7 @@
       <label class="btn secondary" for="importFile"><span>⭱</span> Importa dati</label>
       <input type="file" id="importFile" accept="application/json" style="display:none;">
       <button class="btn secondary" id="btnBackup"><span>🗄️</span> Backup (.zip)</button>
+      <button class="btn secondary" id="btnImpostazioni"><span>⚙️</span> Impostazioni</button>
     </div>
 
     <h2 class="section-title">Andamento mensile</h2>
@@ -442,11 +452,15 @@
 
     <div id="formPanel" class="form-panel" style="display:none;"></div>
     <div id="modelloEditorPanel" class="form-panel" style="display:none;"></div>
+    <div id="ricorrenteFormPanel" class="form-panel" style="display:none;"></div>
 
     <div class="subtabs" id="giornaleViewTabs">
       <button data-gview="elenco" class="active">Elenco movimenti</button>
       <button data-gview="riclass">Totali per etichetta</button>
       <button data-gview="scadenzario">Scadenzario</button>
+      <button data-gview="ricorrenti">Ricorrenti</button>
+      <button data-gview="cassa">Cassa</button>
+      <button data-gview="inventario">Inventario</button>
       <button data-gview="archivio">Archivio</button>
     </div>
     <button class="btn secondary btn-block" id="btnExportCsv" style="margin-bottom:14px;"><span>⭳</span> Esporta libro giornale (CSV per Excel)</button>
@@ -458,6 +472,9 @@
     <div id="giornaleList"></div>
     <div id="riclassTotali" style="display:none;"></div>
     <div id="scadenzarioBody" style="display:none;"></div>
+    <div id="ricorrentiBody" style="display:none;"></div>
+    <div id="cassaBody" style="display:none;"></div>
+    <div id="inventarioBody" style="display:none;"></div>
   </section>
 
   <section class="view" id="view-piano">
@@ -495,6 +512,7 @@
 
 </main>
 
+<div class="modal-back" id="settingsModal" style="display:none;"><div class="modal-box form-panel" id="settingsBox" role="dialog" aria-modal="true"></div></div>
 <footer class="foot">
   Dati estratti da <span id="footFonte"></span> · generato il <span id="footData"></span><br>
   Istantanea statica — per aggiornare, rigenerare la pagina dal file Excel.
@@ -3820,6 +3838,8 @@ const fmtDate = (iso) => {
   const d = new Date(iso);
   return d.toLocaleDateString('it-IT', {day:'2-digit', month:'2-digit', year:'numeric'});
 };
+const fmtEUR2 = new Intl.NumberFormat('it-IT', {style:'currency', currency:'EUR', minimumFractionDigits:2, maximumFractionDigits:2});
+const money2 = (v) => (v===null || v===undefined) ? null : fmtEUR2.format(v);
 const money = (v) => (v===null || v===undefined) ? null : fmtEUR.format(v);
 
 // ---------- State: load draft from localStorage if present, else fall back to baked-in data ----------
@@ -3898,7 +3918,8 @@ function computeRiepilogo(state, saldi){
     if(tipo && tipo.startsWith('Passivo')) totPassivo += -s.raw;
     if(tipo === 'Conto economico' || tipo === 'Conto economico rettificativo'){
       const val = -s.raw; // avere - dare: ricavi positivi, costi negativi
-      if(val >= 0) ricavi += val; else costi += -val;
+      if(idx[code] && idx[code].variazione) costi += -val; // variazione rimanenze: rettifica dei costi, non fatturato
+      else if(val >= 0) ricavi += val; else costi += -val;
     }
   }
   const utile = ricavi - costi;
@@ -3989,7 +4010,8 @@ function computeMonthlySeries(state){
       const dare = Number(r.dare)||0, avere = Number(r.avere)||0;
       if(tipo==='Conto economico' || tipo==='Conto economico rettificativo'){
         const val = avere - dare;
-        if(val>=0) months[key].ricavi += val; else months[key].costi += -val;
+        if(p && p.variazione) months[key].costi += -val;
+        else if(val>=0) months[key].ricavi += val; else months[key].costi += -val;
       }
       if(cashCodes.has(String(r.codice))){
         months[key].cassaDelta += dare - avere;
@@ -4024,8 +4046,8 @@ function trendChartSVG(series){
   const bw = innerW/n;
   const bars = series.map((s,i)=>{
     const x = padL + i*bw;
-    const hR = (s.ricavi/maxVal)*innerH;
-    const hC = (s.costi/maxVal)*innerH;
+    const hR = Math.max(0, s.ricavi/maxVal)*innerH;
+    const hC = Math.max(0, s.costi/maxVal)*innerH; // costi netti negativi (rimanenze) → barra nulla
     const halfW = Math.max(2, bw*0.32);
     const xR = x + bw*0.14;
     const xC = x + bw*0.54;
@@ -4070,6 +4092,10 @@ function renderRiepilogo(){
     {label:'Crediti aperti', value: money(r.crediti), cls: ''},
     {label:'Debiti aperti', value: money(r.debiti), cls: r.debiti>0 ? 'neg':''},
   ];
+  const nPend = occorrenzeDaConfermare().length;
+  const rb = document.getElementById('ricorrentiBanner');
+  rb.innerHTML = nPend ? `<div class="note-box" style="background:var(--warn-soft);align-items:center;justify-content:space-between;flex-wrap:wrap;"><span>🔁 ${nPend} registrazion${nPend===1?'e':'i'} ricorrent${nPend===1?'e':'i'} da confermare (rate, abbonamenti).</span><button class="btn small" id="btnRicBanner">Rivedi</button></div>` : '';
+  const rbb = document.getElementById('btnRicBanner'); if(rbb) rbb.addEventListener('click', ()=> vaiAGiornaleView('ricorrenti'));
   document.getElementById('statCards').innerHTML = cards.map(c=>`
     <div class="stat-card">
       <div class="label">${c.label}</div>
@@ -4167,25 +4193,33 @@ function ripristinaMovimento(id){
 
 // ---------- Giornale ----------
 let giornaleState = {search:'', riclass:null, soloPluriennali:false};
-let giornaleView = 'elenco'; // 'elenco' | 'riclass' | 'archivio'
+let giornaleView = 'elenco'; // 'elenco' | 'riclass' | 'scadenzario' | 'ricorrenti' | 'archivio'
 
 document.getElementById('giornaleViewTabs').addEventListener('click', e=>{
   const btn = e.target.closest('button[data-gview]');
   if(!btn) return;
   giornaleView = btn.dataset.gview;
   document.querySelectorAll('#giornaleViewTabs button').forEach(b=>b.classList.toggle('active', b===btn));
-  const isRiclass = giornaleView === 'riclass';
-  const isArchivio = giornaleView === 'archivio';
-  const isScadenzario = giornaleView === 'scadenzario';
-  document.getElementById('giornaleSearchBar').style.display = (isRiclass||isArchivio||isScadenzario) ? 'none' : '';
-  document.getElementById('riclassChips').style.display = (isRiclass||isArchivio||isScadenzario) ? 'none' : '';
-  document.getElementById('giornaleList').style.display = (isRiclass||isScadenzario) ? 'none' : '';
-  document.getElementById('riclassTotali').style.display = isRiclass ? '' : 'none';
-  document.getElementById('scadenzarioBody').style.display = isScadenzario ? '' : 'none';
-  if(isRiclass) renderRiclassTotali();
-  else if(isScadenzario) renderScadenzario();
-  else renderGiornale();
+  applyGiornaleView();
 });
+function applyGiornaleView(){
+  const v = giornaleView;
+  const own = v==='riclass' || v==='scadenzario' || v==='ricorrenti' || v==='cassa' || v==='inventario';
+  document.getElementById('giornaleSearchBar').style.display = (own||v==='archivio') ? 'none' : '';
+  document.getElementById('riclassChips').style.display = (own||v==='archivio') ? 'none' : '';
+  document.getElementById('giornaleList').style.display = own ? 'none' : '';
+  document.getElementById('riclassTotali').style.display = v==='riclass' ? '' : 'none';
+  document.getElementById('scadenzarioBody').style.display = v==='scadenzario' ? '' : 'none';
+  document.getElementById('ricorrentiBody').style.display = v==='ricorrenti' ? '' : 'none';
+  document.getElementById('cassaBody').style.display = v==='cassa' ? '' : 'none';
+  document.getElementById('inventarioBody').style.display = v==='inventario' ? '' : 'none';
+  if(v==='cassa') renderCassa();
+  else if(v==='inventario') renderInventario();
+  else if(v==='riclass') renderRiclassTotali();
+  else if(v==='scadenzario') renderScadenzario();
+  else if(v==='ricorrenti') renderRicorrenti();
+  else renderGiornale();
+}
 
 function riclassTotals(){
   const totals = {};
@@ -4281,38 +4315,83 @@ function renderGiornale(){
   bindMovimentoCardActions(container);
   if(giornaleView === 'riclass') renderRiclassTotali();
   if(giornaleView === 'scadenzario') renderScadenzario();
+  if(giornaleView === 'ricorrenti') renderRicorrenti();
+  if(giornaleView === 'cassa') renderCassa();
+  if(giornaleView === 'inventario') renderInventario();
 }
 
-// ---------- Scadenzario crediti/debiti ----------
-// Elenca le righe di registrazioni attive, su conti classificati come crediti/debiti a
-// breve o lungo termine (Piano dei Conti), per cui in fase di registrazione è stata indicata
-// una data di scadenza. NON è una riconciliazione automatica fatture/incassi: mostra solo le
-// scadenze che hai scelto di datare tu stesso, e resta a te segnarle come saldate quando
-// incassi o paghi (finché non lo fai, restano nell'elenco anche se il conto è già cambiato
-// per via di altre registrazioni).
-function computeScadenzario(state){
+// ---------- Date e classificazione per scadenza ----------
+function pad2(n){ return String(n).padStart(2,'0'); }
+function todayISO(){
+  const d = new Date();
+  return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate());
+}
+// Somma k mesi a una data ISO (YYYY-MM-DD) mantenendo il giorno di ancoraggio (es. rata il 31:
+// a febbraio cade il 28/29, poi torna al 31).
+function addMonthsISO(iso, k, anchorDay){
+  const [y,m,d] = iso.slice(0,10).split('-').map(Number);
+  const tot = (m-1) + k;
+  const ny = y + Math.floor(tot/12);
+  const nm = ((tot%12)+12)%12;
+  const last = new Date(ny, nm+1, 0).getDate();
+  return ny+'-'+pad2(nm+1)+'-'+pad2(Math.min(anchorDay||d, last));
+}
+function addDaysISO(iso, k){
+  const [y,m,d] = iso.slice(0,10).split('-').map(Number);
+  const dt = new Date(y, m-1, d+k);
+  return dt.getFullYear()+'-'+pad2(dt.getMonth()+1)+'-'+pad2(dt.getDate());
+}
+function round2(x){ return Math.round(x*100)/100; }
+
+// Entro/oltre: due criteri, scelti dalla vista.
+//  - 'bilancio'  : esigibile entro l'esercizio successivo a quello di riferimento (es. bilancio
+//                  al 31/12/2026 → entro il 31/12/2027; oltre = lungo termine).
+//  - 'gestionale': entro 12 mesi da una data di riferimento (es. da oggi 06/10/2026 → 06/10/2027).
+function cutoffScadenza(mode, refISO){
+  if(mode === 'bilancio') return (Number(refISO.slice(0,4))+1) + '-12-31';
+  return addMonthsISO(refISO, 12);
+}
+function classeScadenza(dataISO, cutoff){ return String(dataISO).slice(0,10) <= cutoff ? 'breve' : 'lungo'; }
+
+// ---------- Elenco scadenze di crediti e debiti ----------
+// Fonti: (a) righe registrate con data di scadenza non ancora saldata, sul lato che fa crescere il
+// credito (dare su Attivo) o il debito (avere su Passivo); (b) quote capitale dei piani rate
+// (mutui, finanziamenti) non ancora trasformate in registrazioni.
+// NON è una riconciliazione automatica fatture/incassi: le righe restano aperte finché non le
+// segni come saldate tu stesso.
+function listaScadenze(state){
   const idx = buildPianoIndex(state.piano);
   const items = [];
   for(const m of activeMovimenti(state)){
     m.righe.forEach((r, i)=>{
       if(!r.dataScadenza || r.scadenzaSaldata) return;
       const p = idx[String(r.codice)];
-      if(!p || !p.scadenza) return;
-      const isCredito = p.tipo && p.tipo.startsWith('Attivo');
-      const isDebito = p.tipo && p.tipo.startsWith('Passivo');
+      if(!p || !p.scadenza || !p.tipo) return;
+      const isCredito = p.tipo.startsWith('Attivo');
+      const isDebito = p.tipo.startsWith('Passivo');
       if(!isCredito && !isDebito) return;
-      const importo = Number(r.dare)||Number(r.avere)||0;
+      const importo = isCredito ? (Number(r.dare)||0) : (Number(r.avere)||0);
       if(importo <= 0.005) return;
       items.push({
-        movimentoId: m.id, rigaIdx: i,
-        tipo: isCredito ? 'credito' : 'debito',
-        importo, codice: r.codice, conto: p.conto,
-        desc: m.descrizione, dataScadenza: String(r.dataScadenza).slice(0,10),
+        fonte:'riga', movimentoId:m.id, rigaIdx:i, tipo: isCredito?'credito':'debito',
+        importo, codice:String(r.codice), conto:p.conto, desc:m.descrizione,
+        dataScadenza:String(r.dataScadenza).slice(0,10), dataReg:String(m.data).slice(0,10),
       });
     });
   }
-  const today = new Date().toISOString().slice(0,10);
-  for(const it of items) it.scaduta = it.dataScadenza < today;
+  for(const r of (state.ricorrenti||[])){
+    if(r.kind !== 'rate') continue;
+    const p = idx[String(r.contoPrincipale)];
+    for(const o of occorrenzeRicorrente(r)){
+      if(o.n === 0 || o.capitale <= 0.005) continue;
+      if(occorrenzaGenerata(r, o.n) || (r.saltate||[]).includes(o.n)) continue;
+      items.push({
+        fonte:'piano', pianoId:r.id, n:o.n, tipo: r.direzione==='credito'?'credito':'debito',
+        importo:o.capitale, rataTotale:o.importo, codice:String(r.contoPrincipale), conto:p?p.conto:r.contoPrincipale,
+        desc:`${r.nome} — rata ${o.n}/${r.nRate}`, dataScadenza:o.data, dataReg:'0000-00-00',
+      });
+    }
+  }
   items.sort((a,b)=> a.dataScadenza < b.dataScadenza ? -1 : a.dataScadenza > b.dataScadenza ? 1 : 0);
   return items;
 }
@@ -4323,44 +4402,478 @@ function segnaScadenzaSaldata(movimentoId, rigaIdx){
   m.righe[rigaIdx].scadenzaSaldata = true;
   m.righe[rigaIdx].scadenzaSaldataIl = new Date().toISOString();
   saveState();
-  renderScadenzario();
-  renderHeader();
+  renderAll();
 }
 
+// Totali breve/lungo per un Attivo/Passivo: per ogni conto con saldo aperto si assegnano le
+// scadenze datate partendo dalle più lontane (i pagamenti chiudono prima le più vicine) fino a
+// coprire il saldo; l'eventuale resto, senza data, usa la classificazione di default del conto.
+function scadenzaTotals(acc, idx, asOf, mode){
+  mode = mode || 'bilancio';
+  const ref = asOf || todayISO();
+  const cutoff = cutoffScadenza(mode, ref);
+  const items = listaScadenze(STATE).filter(it=> it.fonte==='piano' || it.dataReg <= ref);
+  let creditiBreve=0, creditiLungo=0, creditiNC=0, debitiBreve=0, debitiLungo=0, debitiNC=0;
+  for(const code in acc){
+    const p = idx[code]; if(!p) continue;
+    const raw = (acc[code].dare||0) - (acc[code].avere||0);
+    const isC = p.tipo === 'Attivo', isD = p.tipo === 'Passivo';
+    if(!isC && !isD) continue;
+    let v = isC ? raw : -raw;
+    if(v <= 0.005) continue;
+    if(!p.scadenza && !items.some(it=>it.codice===code)) continue; // solo conti di crediti/debiti (non cassa, banche, ecc.)
+    const mine = items.filter(it=> it.codice===code && (isC ? it.tipo==='credito' : it.tipo==='debito'))
+                      .sort((a,b)=> a.dataScadenza < b.dataScadenza ? 1 : -1);
+    let breve=0, lungo=0;
+    for(const it of mine){
+      if(v <= 0.005) break;
+      const take = Math.min(it.importo, v);
+      if(classeScadenza(it.dataScadenza, cutoff)==='breve') breve += take; else lungo += take;
+      v -= take;
+    }
+    let nc = 0;
+    if(v > 0.005){
+      if(p.scadenza==='lungo') lungo += v;
+      else if(p.scadenza==='breve') breve += v;
+      else nc = v;
+    }
+    if(isC){ creditiBreve+=breve; creditiLungo+=lungo; creditiNC+=nc; }
+    else { debitiBreve+=breve; debitiLungo+=lungo; debitiNC+=nc; }
+  }
+  return {creditiBreve,creditiLungo,creditiNC,debitiBreve,debitiLungo,debitiNC,cutoff,mode};
+}
+
+// ---------- Scadenzario (sottoscheda Giornale) ----------
+let scadenzarioMode = 'gestionale'; // 'gestionale' (12 mesi da oggi) | 'bilancio' (entro esercizio successivo)
 function renderScadenzario(){
   const container = document.getElementById('scadenzarioBody');
-  const items = computeScadenzario(STATE);
-  const introBox = `<div class="note-box" style="background:var(--primary-soft);color:var(--primary);"><span>ℹ️</span><span>Scadenze indicate da te in fase di registrazione (solo per conti classificati come crediti/debiti nel Piano dei Conti). Non è una riconciliazione automatica: quando incassi o paghi, segna la scadenza come saldata per toglierla dall'elenco.</span></div>`;
+  const items = listaScadenze(STATE);
+  const today = todayISO();
+  const ref = today;
+  const cutoff = cutoffScadenza(scadenzarioMode, ref);
+  const modeLabel = scadenzarioMode==='bilancio'
+    ? `Vista bilancio: entro = scadenza fino al <b>${fmtDate(cutoff)}</b> (fine dell'esercizio successivo a quello in corso); oltre = lungo termine.`
+    : `Vista gestionale: entro = scadenza fino al <b>${fmtDate(cutoff)}</b> (12 mesi da oggi); oltre = lungo termine.`;
+  const introBox = `<div class="note-box" style="background:var(--primary-soft);color:var(--primary);"><span>ℹ️</span><span>Scadenze indicate da te in registrazione (campo "Data di scadenza" sui conti di crediti/debiti) più le quote capitale dei piani rate. Non è una riconciliazione automatica: quando incassi o paghi, segna la scadenza come saldata per toglierla dall'elenco.</span></div>
+    <div class="subtabs" id="scadModeTabs"><button data-smode="gestionale" class="${scadenzarioMode==='gestionale'?'active':''}">Gestionale (12 mesi)</button><button data-smode="bilancio" class="${scadenzarioMode==='bilancio'?'active':''}">Bilancio (esercizio)</button></div>
+    <p class="panel-note" style="margin:0 0 12px;">${modeLabel}</p>`;
+  const sum = (tipo, cl)=> items.filter(i=>i.tipo===tipo && classeScadenza(i.dataScadenza,cutoff)===cl).reduce((s,i)=>s+i.importo,0);
+  const totals = items.length ? `<div class="summary-mini">
+      <div class="mini-card"><div class="mini-label">Crediti entro</div><div class="mini-value">${money(sum('credito','breve'))}</div></div>
+      <div class="mini-card"><div class="mini-label">Crediti oltre</div><div class="mini-value">${money(sum('credito','lungo'))}</div></div>
+      <div class="mini-card"><div class="mini-label">Debiti entro</div><div class="mini-value">${money(sum('debito','breve'))}</div></div>
+      <div class="mini-card"><div class="mini-label">Debiti oltre</div><div class="mini-value">${money(sum('debito','lungo'))}</div></div>
+    </div>` : '';
+  let body = '';
   if(items.length===0){
-    container.innerHTML = introBox + '<div class="empty">Nessuna scadenza aperta al momento.</div>';
-    return;
+    body = '<div class="empty">Nessuna scadenza aperta al momento.</div>';
+  } else {
+    const sectionHTML = (title, list) => {
+      if(list.length===0) return '';
+      return `<h2 class="section-title" style="margin-top:18px;">${title}</h2><div class="scad-list">` +
+        list.map(it=>{
+          const scaduta = it.dataScadenza < today;
+          const cl = classeScadenza(it.dataScadenza, cutoff);
+          const azione = it.fonte==='riga'
+            ? `<button class="btn small" data-salda>✓ Segna come saldata</button>`
+            : (scaduta ? `<button class="btn small" data-vai-ric>Conferma in Ricorrenti</button>` : `<span class="scad-badge">da piano rate</span>`);
+          return `
+          <div class="scad-item ${scaduta?'overdue':''}" data-mov="${it.movimentoId||''}" data-idx="${it.rigaIdx!==undefined?it.rigaIdx:''}">
+            <div class="scad-top">
+              <div><div class="scad-conto">${it.codice} — ${it.conto}</div><div class="scad-desc">${it.desc}</div></div>
+              <div class="scad-importo">${money(it.importo)}</div>
+            </div>
+            <div class="scad-meta">
+              <span class="scad-data ${scaduta?'overdue':''}">${scaduta?'⚠️ Scaduta il ':'Scade il '}${fmtDate(it.dataScadenza)} · ${cl==='breve'?'entro':'oltre'}</span>
+              ${azione}
+            </div>
+            ${it.rataTotale ? `<div class="scad-desc">Quota capitale; rata totale con interessi ${money2(it.rataTotale)}</div>`:''}
+          </div>`;
+        }).join('') + `</div>`;
+    };
+    body = sectionHTML('Crediti in scadenza', items.filter(i=>i.tipo==='credito')) + sectionHTML('Debiti in scadenza', items.filter(i=>i.tipo==='debito'));
   }
-  const crediti = items.filter(i=>i.tipo==='credito');
-  const debiti = items.filter(i=>i.tipo==='debito');
-  const sectionHTML = (title, list) => {
-    if(list.length===0) return '';
-    return `<h2 class="section-title" style="margin-top:18px;">${title}</h2><div class="scad-list">` +
-      list.map(it=>`
-        <div class="scad-item ${it.scaduta?'overdue':''}" data-mov="${it.movimentoId}" data-idx="${it.rigaIdx}">
-          <div class="scad-top">
-            <div><div class="scad-conto">${it.codice} — ${it.conto}</div><div class="scad-desc">${it.desc}</div></div>
-            <div class="scad-importo">${money(it.importo)}</div>
-          </div>
-          <div class="scad-meta">
-            <span class="scad-data ${it.scaduta?'overdue':''}">${it.scaduta?'⚠️ Scaduta il ':'Scade il '}${fmtDate(it.dataScadenza)}</span>
-            <button class="btn small" data-salda>✓ Segna come saldata</button>
-          </div>
-        </div>
-      `).join('') + `</div>`;
-  };
-  container.innerHTML = introBox + sectionHTML('Crediti in scadenza', crediti) + sectionHTML('Debiti in scadenza', debiti);
+  container.innerHTML = introBox + totals + body;
+  container.querySelectorAll('[data-smode]').forEach(b=>{
+    b.addEventListener('click', ()=>{ scadenzarioMode = b.dataset.smode; renderScadenzario(); });
+  });
   container.querySelectorAll('[data-salda]').forEach(b=>{
     b.addEventListener('click', ()=>{
       const card = b.closest('.scad-item');
       segnaScadenzaSaldata(card.dataset.mov, Number(card.dataset.idx));
     });
   });
+  container.querySelectorAll('[data-vai-ric]').forEach(b=>{
+    b.addEventListener('click', ()=> vaiAGiornaleView('ricorrenti'));
+  });
 }
+
+// ---------- Ricorrenti: piani rate (mutui/finanziamenti) e costi/ricavi periodici ----------
+// Ogni piano genera "occorrenze" datate. Quelle già scadute (data <= oggi) vengono PROPOSTE e
+// diventano registrazioni nel libro giornale solo dopo la conferma del contabile (importi
+// modificabili). Un'occorrenza è già generata se esiste una registrazione attiva con lo stesso
+// ricorrenteOrigine ("idPiano|n"); se quella registrazione viene archiviata torna da confermare.
+function occorrenzeRicorrente(r){
+  const out = [];
+  if(r.kind === 'cespite') return occorrenzeCespite(r);
+  if(r.kind === 'rate'){
+    const C = Number(r.capitale)||0, n = Math.max(1, Math.floor(Number(r.nRate)||0));
+    const mesi = Number(r.periodicita)||1;
+    const i = (Number(r.tasso)||0)/100*mesi/12;
+    if(!(C>0) || !r.dataPrimaRata) return out;
+    const anchor = Number(r.dataPrimaRata.slice(8,10));
+    if(r.includiErogazione && r.dataErogazione){
+      out.push({n:0, data:r.dataErogazione, capitale:C, interessi:0, importo:C});
+    }
+    const rata = i>0 ? C*i/(1-Math.pow(1+i,-n)) : C/n;
+    let residuo = C;
+    for(let k=1; k<=n; k++){
+      const interessi = round2(residuo*i);
+      const capitale = k===n ? round2(residuo) : round2(rata - interessi);
+      out.push({n:k, data:addMonthsISO(r.dataPrimaRata, (k-1)*mesi, anchor), capitale, interessi, importo:round2(capitale+interessi), residuo:round2(residuo-capitale)});
+      residuo = round2(residuo - capitale);
+    }
+  } else if(r.kind === 'periodico'){
+    const imp = Number(r.importo)||0, mesi = Number(r.periodicita)||1;
+    if(!(imp>0) || !r.dataInizio) return out;
+    const anchor = Number(r.dataInizio.slice(8,10));
+    const maxN = r.nOccorrenze ? Math.floor(Number(r.nOccorrenze)) : 600;
+    const orizzonte = addMonthsISO(todayISO(), 12);
+    for(let k=0; k<maxN; k++){
+      const data = addMonthsISO(r.dataInizio, k*mesi, anchor);
+      if(r.dataFine && data > r.dataFine) break;
+      if(!r.dataFine && !r.nOccorrenze && data > orizzonte) break;
+      out.push({n:k+1, data, capitale:0, interessi:0, importo:imp});
+    }
+  }
+  return out;
+}
+function ricorrenteKey(r, n){ return r.id + '|' + n; }
+function occorrenzaGenerata(r, n){
+  const key = ricorrenteKey(r, n);
+  return STATE.movimenti.some(m => !m.archiviato && m.ricorrenteOrigine === key);
+}
+function occorrenzeDaConfermare(){
+  const today = todayISO(), res = [];
+  for(const r of (STATE.ricorrenti||[])){
+    for(const o of occorrenzeRicorrente(r)){
+      if(o.data > today) continue;
+      if((r.saltate||[]).includes(o.n) || occorrenzaGenerata(r, o.n)) continue;
+      res.push({r, o});
+    }
+  }
+  res.sort((a,b)=> a.o.data < b.o.data ? -1 : a.o.data > b.o.data ? 1 : 0);
+  return res;
+}
+function descrizioneOccorrenza(r, o){
+  if(r.kind==='cespite') return `${r.nome} — ammortamento esercizio ${o.n}`;
+  if(r.kind==='rate') return o.n===0 ? `${r.nome} — ${r.direzione==='credito'?'concessione':'erogazione'}` : `${r.nome} — rata ${o.n}/${r.nRate}`;
+  return `${r.nome} — ${r.tipo==='ricavo'?'ricavo':'costo'} periodico`;
+}
+// Costruisce la registrazione (righe) per un'occorrenza; "ov" contiene eventuali importi corretti.
+function movimentoDaOccorrenza(r, o, ov){
+  ov = ov || {};
+  const righe = [];
+  let competenzaDal = null, competenzaAl = null;
+  if(r.kind==='rate'){
+    const cap = ov.capitale!==undefined ? round2(Number(ov.capitale)||0) : o.capitale;
+    const inte = ov.interessi!==undefined ? round2(Number(ov.interessi)||0) : o.interessi;
+    const tot = round2(cap + inte);
+    const deb = r.direzione !== 'credito';
+    if(o.n===0){
+      righe.push({codice:deb?r.contoBanca:r.contoPrincipale, dare:cap, avere:0, riclass:null});
+      righe.push({codice:deb?r.contoPrincipale:r.contoBanca, dare:0, avere:cap, riclass:null});
+    } else if(deb){
+      righe.push({codice:r.contoPrincipale, dare:cap, avere:0, riclass:null});
+      if(inte>0.004) righe.push({codice:r.contoInteressi, dare:inte, avere:0, riclass:null});
+      righe.push({codice:r.contoBanca, dare:0, avere:tot, riclass:null});
+    } else {
+      righe.push({codice:r.contoBanca, dare:tot, avere:0, riclass:null});
+      righe.push({codice:r.contoPrincipale, dare:0, avere:cap, riclass:null});
+      if(inte>0.004) righe.push({codice:r.contoInteressi, dare:0, avere:inte, riclass:null});
+    }
+  } else if(r.kind==='cespite'){
+    const imp = ov.importo!==undefined ? round2(Number(ov.importo)||0) : o.importo;
+    righe.push({codice:r.contoAmm, dare:imp, avere:0, riclass:null});
+    righe.push({codice:r.contoFondo, dare:0, avere:imp, riclass:null});
+  } else {
+    const imp = ov.importo!==undefined ? round2(Number(ov.importo)||0) : o.importo;
+    const costo = r.tipo !== 'ricavo';
+    const cp = PIANO_INDEX[String(r.contropartita)];
+    const scad = (cp && cp.scadenza) ? addDaysISO(o.data, Number(r.giorniDilazione)||0) : null;
+    const iva = ivaDi(imp, ivaAliquotaPiano(r)), tot = round2(imp + iva);
+    const rigaCP = {codice:r.contropartita, dare:costo?0:tot, avere:costo?tot:0, riclass:null};
+    if(scad) rigaCP.dataScadenza = scad;
+    const rigaEco = {codice:r.contoEconomico, dare:costo?imp:0, avere:costo?0:imp, riclass:null};
+    const rigaIva = iva>0 ? {codice:costo?'14.05':'25.01', dare:costo?iva:0, avere:costo?0:iva, riclass:null} : null;
+    if(costo){ righe.push(rigaEco); if(rigaIva) righe.push(rigaIva); righe.push(rigaCP); }
+    else { righe.push(rigaCP, rigaEco); if(rigaIva) righe.push(rigaIva); }
+    if(r.competenza){
+      competenzaDal = o.data;
+      competenzaAl = addDaysISO(addMonthsISO(o.data, Number(r.periodicita)||1, Number(o.data.slice(8,10))), -1);
+    }
+  }
+  return {
+    id: 'm' + (STATE.movimenti.length+1) + '_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2,6),
+    data: o.data, descrizione: descrizioneOccorrenza(r, o),
+    competenzaDal, competenzaAl, righe, ricorrenteOrigine: ricorrenteKey(r, o.n),
+  };
+}
+
+let ricorrentiEdits = {};   // modifiche agli importi nella lista "da confermare", per chiave
+let ricorrentiChecked = {}; // spunte, per chiave (default: tutte selezionate)
+let ricorrenteForm = null;  // stato della form di creazione/modifica piano
+
+function vaiAGiornaleView(view){
+  goToTab('giornale');
+  const btn = document.querySelector(`#giornaleViewTabs button[data-gview="${view}"]`);
+  if(btn) btn.click();
+}
+
+function renderRicorrenti(){
+  const container = document.getElementById('ricorrentiBody');
+  const pending = occorrenzeDaConfermare();
+  const piani = STATE.ricorrenti || [];
+  const pendHTML = pending.length===0
+    ? '<div class="empty">Nessuna registrazione da confermare al momento.</div>'
+    : pending.map(({r,o})=>{
+        const key = ricorrenteKey(r,o.n);
+        const checked = ricorrentiChecked[key] !== false;
+        const ed = ricorrentiEdits[key] || {};
+        const amounts = r.kind==='rate'
+          ? `<div class="rr-amounts"><div class="field" style="margin:0;"><label>Capitale €</label><input type="number" step="0.01" min="0" data-ric-edit="${key}" data-f="capitale" value="${ed.capitale!==undefined?ed.capitale:o.capitale}"></div><div class="field" style="margin:0;"><label>Interessi €</label><input type="number" step="0.01" min="0" data-ric-edit="${key}" data-f="interessi" value="${ed.interessi!==undefined?ed.interessi:o.interessi}"></div></div>`
+          : `<div class="field" style="margin:0;"><label>${ivaAliquotaPiano(r)>0?'Imponibile €':'Importo €'}</label><input type="number" step="0.01" min="0" data-ric-edit="${key}" data-f="importo" value="${ed.importo!==undefined?ed.importo:o.importo}"></div>`;
+        return `<div class="riga-editor-row">
+          <label style="display:flex;align-items:center;gap:8px;"><input type="checkbox" data-ric-check="${key}" ${checked?'checked':''} style="width:18px;height:18px;flex:0 0 auto;"><span style="font-weight:700;font-size:13.5px;">${fmtDate(o.data)} — ${descrizioneOccorrenza(r,o)}</span></label>
+          ${amounts}
+        </div>`;
+      }).join('');
+  const pianiHTML = piani.length===0 ? '<div class="empty">Nessun piano. Aggiungi un mutuo/finanziamento, un costo/ricavo periodico o una scheda di ammortamento.</div>' : piani.map(r=>{
+    const occ = occorrenzeRicorrente(r);
+    const fatte = occ.filter(o=>occorrenzaGenerata(r,o.n)).length;
+    const prossima = occ.find(o=> !occorrenzaGenerata(r,o.n) && !(r.saltate||[]).includes(o.n));
+    const desc = r.kind==='rate'
+      ? `${r.direzione==='credito'?'Finanziamento concesso':'Mutuo / finanziamento ricevuto'} · ${money(r.capitale)} · ${r.nRate} rate ${({1:'mensili',3:'trimestrali',6:'semestrali',12:'annuali'})[r.periodicita]||''} · tasso ${r.tasso||0}%`
+      : r.kind==='cespite'
+      ? `Scheda di ammortamento · costo ${money2(r.costo)}${Number(r.valoreResiduo)>0?' · residuo '+money2(r.valoreResiduo):''} · vita utile ${r.vitaUtile} anni · disponibile dal ${fmtDate(r.dataDisponibilita)}`
+      : `${r.tipo==='ricavo'?'Ricavo':'Costo'} periodico · ${money2(r.importo)} ogni ${r.periodicita} mes${r.periodicita==1?'e':'i'}`;
+    return `<div class="panel" style="margin-bottom:10px;">
+      <div style="font-weight:700;">${r.esempio?'<span class="archiviato-badge" style="margin-right:6px;">ESEMPIO</span>':''}${r.nome}</div>
+      <div class="panel-note" style="margin:2px 0;">${desc}</div>
+      <div class="panel-note" style="margin:2px 0;">Registrate: ${fatte}/${occ.length}${prossima?` · prossima: ${fmtDate(prossima.data)} (${money2(prossima.importo)})`:' · completato'}</div>
+      ${r.kind==='periodico' && ivaAliquotaPiano(r)>0 ? `<div class="panel-note" style="margin:2px 0;">IVA ${r.ivaAliquota}% · totale a occorrenza ${money2(r.importo+ivaDi(r.importo,r.ivaAliquota))}</div>` : ''}
+      ${r.kind==='cespite' ? (acquistoCespite(r) ? '<div class="panel-note" style="margin:2px 0;">✓ Acquisto registrato nel giornale</div>' : `<div class="panel-note" style="margin:2px 0;">Acquisto non ancora registrato nel giornale. <button class="btn small" data-ric-acq="${r.id}">Registra acquisto…</button></div>`) + tabellaAmmortamentoHTML(r) : ''}
+      <div style="display:flex;gap:6px;margin-top:8px;"><button class="btn small" data-ric-edit-piano="${r.id}">✎ Modifica</button><button class="btn small danger" data-ric-del="${r.id}">🗑 Elimina piano</button></div>
+    </div>`;
+  }).join('');
+  const nSel = pending.filter(({r,o})=> ricorrentiChecked[ricorrenteKey(r,o.n)] !== false).length;
+  container.innerHTML = `
+    <div class="note-box" style="background:var(--primary-soft);color:var(--primary);"><span>ℹ️</span><span>Qui definisci rate (mutui, finanziamenti), costi/ricavi periodici (abbonamenti) e schede di ammortamento delle immobilizzazioni. Alla scadenza l'app ti <b>propone</b> la registrazione: diventa una scrittura nel giornale solo dopo la tua conferma, con importi modificabili. Se la archivi, torna da confermare. ${ivaOn()?'IVA attiva: gli importi dei periodici sono imponibili.':'IVA non gestita (attivala da ⚙ Impostazioni): inserisci l\'importo come lo vuoi a libro.'}</span></div>
+    <h2 class="section-title">Da confermare (${pending.length})</h2>
+    ${pendHTML}
+    ${pending.length ? `<div class="form-actions" style="margin-bottom:14px;"><button class="btn primary" id="btnRicConferma" ${nSel?'':'disabled'}>Conferma ${nSel} registrazion${nSel===1?'e':'i'}</button><button class="btn" id="btnRicSalta" ${nSel?'':'disabled'}>Salta le selezionate</button></div>` : ''}
+    <h2 class="section-title">Piani attivi</h2>
+    ${pianiHTML}
+    <button class="btn secondary btn-block" id="btnNuovoPianoRate">＋ Piano rate (mutuo / finanziamento)</button>
+    <button class="btn secondary btn-block" id="btnNuovoPeriodico">＋ Costo / ricavo periodico</button>
+    <button class="btn secondary btn-block" id="btnNuovoCespite">＋ Scheda di ammortamento (immobilizzazione)</button>
+  `;
+  container.querySelectorAll('[data-ric-check]').forEach(cb=> cb.addEventListener('change', e=>{ ricorrentiChecked[e.target.dataset.ricCheck] = e.target.checked; renderRicorrenti(); }));
+  container.querySelectorAll('[data-ric-edit]').forEach(inp=> inp.addEventListener('input', e=>{
+    const k = e.target.dataset.ricEdit; ricorrentiEdits[k] = ricorrentiEdits[k] || {}; ricorrentiEdits[k][e.target.dataset.f] = e.target.value;
+  }));
+  const bC = document.getElementById('btnRicConferma'); if(bC) bC.addEventListener('click', confermaOccorrenze);
+  const bS = document.getElementById('btnRicSalta'); if(bS) bS.addEventListener('click', saltaOccorrenze);
+  container.querySelectorAll('[data-ric-edit-piano]').forEach(b=> b.addEventListener('click', ()=> apriRicorrenteForm(STATE.ricorrenti.find(r=>r.id===b.dataset.ricEditPiano))));
+  container.querySelectorAll('[data-ric-acq]').forEach(b=> b.addEventListener('click', ()=>{
+    const r = STATE.ricorrenti.find(x=>x.id===b.dataset.ricAcq); if(!r) return;
+    apriRicorrenteForm(r); ricorrenteForm.registraAcquisto = true; ricorrenteForm.dataAcquisto = r.dataDisponibilita||''; ricorrenteForm.contoAcquisto = r.contoAcquisto||'24.01'; renderRicorrenteForm();
+  }));
+  container.querySelectorAll('[data-ric-del]').forEach(b=> b.addEventListener('click', ()=>{
+    const r = STATE.ricorrenti.find(x=>x.id===b.dataset.ricDel); if(!r) return;
+    if(!confirm(`Eliminare il piano "${r.nome}"?\n\nLe registrazioni già create restano nel libro giornale (per legge, art. 2219 c.c., le scritture contabili non si cancellano); spariscono solo le scadenze future ancora da generare.`)) return;
+    STATE.ricorrenti = STATE.ricorrenti.filter(x=>x.id!==r.id); saveState(); renderAll();
+  }));
+  document.getElementById('btnNuovoPianoRate').addEventListener('click', ()=> apriRicorrenteForm(null,'rate'));
+  document.getElementById('btnNuovoPeriodico').addEventListener('click', ()=> apriRicorrenteForm(null,'periodico'));
+  document.getElementById('btnNuovoCespite').addEventListener('click', ()=> apriRicorrenteForm(null,'cespite'));
+}
+
+function selezionateOccorrenze(){
+  return occorrenzeDaConfermare().filter(({r,o})=> ricorrentiChecked[ricorrenteKey(r,o.n)] !== false);
+}
+function confermaOccorrenze(){
+  const sel = selezionateOccorrenze(); if(!sel.length) return;
+  if(!confirm(`Registrare ${sel.length} operazion${sel.length===1?'e':'i'} nel libro giornale?\n\nSaranno registrazioni vere (modificabili o archiviabili in seguito come tutte le altre).`)) return;
+  for(const {r,o} of sel){
+    const key = ricorrenteKey(r,o.n);
+    const m = movimentoDaOccorrenza(r, o, ricorrentiEdits[key]);
+    if(Math.abs(m.righe.reduce((s,x)=>s+x.dare-x.avere,0)) > 0.005){ alert(`Importi non quadrati per "${m.descrizione}": controlla capitale e interessi.`); return; }
+    STATE.movimenti.push(m);
+    delete ricorrentiEdits[key]; delete ricorrentiChecked[key];
+  }
+  saveState(); renderAll();
+}
+function saltaOccorrenze(){
+  const sel = selezionateOccorrenze(); if(!sel.length) return;
+  if(!confirm(`Saltare ${sel.length} occorrenz${sel.length===1?'a':'e'}? Non verranno più proposte (nessuna registrazione creata).`)) return;
+  for(const {r,o} of sel){ r.saltate = r.saltate || []; r.saltate.push(o.n); delete ricorrentiChecked[ricorrenteKey(r,o.n)]; }
+  saveState(); renderAll();
+}
+
+function contoSelectHTML(cls, selected){ return `<select class="${cls}">${pianoOptionsHTML(selected)}</select>`; }
+function apriRicorrenteForm(existing, kind){
+  if(existing){ ricorrenteForm = JSON.parse(JSON.stringify(existing)); }
+  else if(kind==='rate'){
+    ricorrenteForm = {id:null, kind:'rate', nome:'', direzione:'debito', capitale:'', tasso:'', nRate:'', periodicita:1, dataPrimaRata:'', includiErogazione:false, dataErogazione:'', contoPrincipale:'23.01', contoBanca:'15.01', contoInteressi:'61.01', saltate:[]};
+  } else if(kind==='cespite'){
+    const p = CESPITE_PRESET.hardware;
+    ricorrenteForm = {id:null, kind:'cespite', nome:'', preset:'hardware', costo:'', valoreResiduo:0, vitaUtile:p.vita, dataDisponibilita:'', primoAnno:'meta', contoCespite:p.cespite, contoAmm:p.amm, contoFondo:p.fondo, ivaAliquota:impost().aliquotaIva, registraAcquisto:false, contoAcquisto:'24.01', dataAcquisto:'', saltate:[]};
+  } else {
+    ricorrenteForm = {id:null, kind:'periodico', nome:'', tipo:'costo', importo:'', periodicita:1, dataInizio:'', dataFine:'', nOccorrenze:'', contoEconomico:'31.05', contropartita:'15.01', giorniDilazione:0, competenza:false, ivaAliquota:impost().aliquotaIva, saltate:[]};
+  }
+  renderRicorrenteForm();
+  document.getElementById('ricorrenteFormPanel').scrollIntoView({behavior:'smooth', block:'start'});
+}
+function chiudiRicorrenteForm(){
+  ricorrenteForm = null;
+  const p = document.getElementById('ricorrenteFormPanel'); p.style.display='none'; p.innerHTML='';
+}
+function anteprimaRicorrenteHTML(f){
+  const occ = occorrenzeRicorrente(f);
+  if(!occ.length) return 'Compila importo, durata e prima data per vedere l\'anteprima.';
+  if(f.kind==='cespite'){
+    const first = occ[0], last = occ[occ.length-1];
+    return `${occ.length} quot${occ.length===1?'a':'e'} annual${occ.length===1?'e':'i'}: ${money2(first.importo)} nel ${first.n}${occ.length>1?`, fino a ${money2(last.importo)} nel ${last.n}`:''}. Ammortamento totale ${money2(last.fondo)} su un costo di ${money2(f.costo)}. Le quote si propongono al 31/12 di ogni esercizio, da confermare. Questo è l'ammortamento civilistico (a bilancio): la deduzione fiscale segue i coefficienti del DM 31/12/1988 e può differire.`;
+  }
+  if(f.kind==='rate'){
+    const rate = occ.filter(o=>o.n>0);
+    const totInt = rate.reduce((s,o)=>s+o.interessi,0);
+    const first = rate[0], last = rate[rate.length-1];
+    return `Rata ${money2(first.importo)} (capitale ${money2(first.capitale)} + interessi ${money2(first.interessi)}) il ${fmtDate(first.data)}; ultima il ${fmtDate(last.data)}. Interessi totali: ${money2(totInt)}. Ammortamento "alla francese" (rata costante): se la banca applica un piano diverso, correggi capitale e interessi al momento della conferma.`;
+  }
+  const ivaTxt = (f.kind==='periodico' && ivaOn() && Number(f.ivaAliquota)>0) ? ` Con IVA ${f.ivaAliquota}%: ${money2(Number(f.importo)+ivaDi(f.importo,f.ivaAliquota))} a occorrenza (IVA ${money2(ivaDi(f.importo,f.ivaAliquota))}).` : '';
+  return ivaTxt.trim() + (ivaTxt?' ':'') + `${occ.length} occorrenz${occ.length===1?'a':'e'} da ${fmtDate(occ[0].data)} a ${fmtDate(occ[occ.length-1].data)}${(!f.dataFine && !f.nOccorrenze)?' (senza fine: genero i 12 mesi successivi a oggi, poi si estende da sé)':''}.`;
+}
+function renderRicorrenteForm(){
+  const f = ricorrenteForm; if(!f) return;
+  const panel = document.getElementById('ricorrenteFormPanel');
+  const periodSel = `<select data-rf="periodicita">${[[1,'Mensile'],[3,'Trimestrale'],[6,'Semestrale'],[12,'Annuale']].map(([v,l])=>`<option value="${v}" ${Number(f.periodicita)===v?'selected':''}>${l}</option>`).join('')}</select>`;
+  const PH = {capitale:'es. 30000', tasso:'es. 4,37 (media nuovi prestiti PMI luglio 2026: 4,37%)', nRate:'es. 60', importo:'es. 25,00', costo:'es. 1500,00', vitaUtile:'es. 5', valoreResiduo:'0', soglia:''};
+  const inp = (label, key, type, extra)=> `<div class="field"><label>${label}</label><input type="${type}" ${extra||''} ${PH[key]?`placeholder="${PH[key]}"`:''} data-rf="${key}" value="${(f[key]===undefined||f[key]===null)?'':String(f[key]).replace(/"/g,'&quot;')}"></div>`;
+  const sel = (label, key)=> `<div class="field"><label>${label}</label><select data-rf="${key}">${pianoOptionsHTML(f[key])}</select></div>`;
+  const ivaSel = ivaOn() ? `<div class="field"><label>Aliquota IVA (l'importo è l'imponibile)</label><select data-rf="ivaAliquota">${IVA_ALIQUOTE.map(a=>`<option value="${a}" ${Number(f.ivaAliquota)===a?'selected':''}>${a}%${a===0?' (esente / non imponibile / inversione contabile)':''}</option>`).join('')}</select></div>` : '';
+  const acquistoBlocco = (f.kind==='cespite' && !acquistoCespite(f)) ? `
+      <div class="competenza-toggle" id="rfAcq"><div class="switch ${f.registraAcquisto?'on':''}"></div><span>Registra anche l'acquisto del bene nel giornale (dare ${f.contoCespite||'conto bene'}${ivaOn()?' + IVA':''})</span></div>
+      ${f.registraAcquisto ? `${inp('Data acquisto','dataAcquisto','date')}${sel('Contropartita (banca o debito verso fornitori)','contoAcquisto')}` : ''}` : (f.kind==='cespite' ? '<p class="panel-note">✓ Acquisto già registrato nel giornale.</p>' : '');
+  let fields;
+  if(f.kind==='rate'){
+    fields = `
+      ${inp('Nome (es. Mutuo Banca X)','nome','text')}
+      <div class="field"><label>Tipo</label><select data-rf="direzione"><option value="debito" ${f.direzione==='debito'?'selected':''}>Ho ricevuto un mutuo / finanziamento (debito)</option><option value="credito" ${f.direzione==='credito'?'selected':''}>Ho concesso un finanziamento (credito)</option></select></div>
+      <div class="field-row">${inp('Capitale €','capitale','number','step="0.01" min="0"')}${inp('Tasso annuo %','tasso','number','step="0.001" min="0"')}</div>
+      <div class="field-row">${inp('N° rate','nRate','number','step="1" min="1"')}<div class="field"><label>Periodicità</label>${periodSel}</div></div>
+      ${inp('Data prima rata','dataPrimaRata','date')}
+      <div class="competenza-toggle" id="rfErog"><div class="switch ${f.includiErogazione?'on':''}"></div><span>Registra anche l'${f.direzione==='credito'?'erogazione al debitore':'incasso del capitale (erogazione)'} con una data</span></div>
+      ${f.includiErogazione ? inp('Data erogazione','dataErogazione','date') : ''}
+      ${sel(f.direzione==='credito'?'Conto del credito':'Conto del debito','contoPrincipale')}
+      ${sel('Conto banca / cassa','contoBanca')}
+      ${sel('Conto interessi','contoInteressi')}`;
+  } else if(f.kind==='cespite'){
+    const presetSel = `<div class="field"><label>Tipo di bene</label><select data-rf="preset">${Object.entries(CESPITE_PRESET).map(([k,v])=>`<option value="${k}" ${f.preset===k?'selected':''}>${v.label}</option>`).join('')}</select></div>`;
+    const primo = `<div class="field"><label>Primo esercizio</label><select data-rf="primoAnno"><option value="meta" ${f.primoAnno==='meta'?'selected':''}>Metà aliquota (semplificazione ammessa da OIC 16)</option><option value="prorata" ${f.primoAnno==='prorata'?'selected':''}>Pro rata temporis (dai giorni effettivi)</option><option value="intero" ${f.primoAnno==='intero'?'selected':''}>Quota intera</option></select></div>`;
+    fields = `
+      <div class="note-box" style="background:var(--neutral-soft);color:var(--text-dim);"><span>ℹ️</span><span>La scheda calcola solo le <b>quote di ammortamento</b>. L'acquisto del bene lo registri a parte nel giornale (es. dare 11.01, avere banca o fornitori): poi confronta il costo con il saldo del conto.</span></div>
+      ${inp('Nome del bene (es. Notebook sviluppo)','nome','text')}
+      ${presetSel}
+      <div class="field-row">${inp('Costo storico €','costo','number','step="0.01" min="0"')}${inp('Valore residuo €','valoreResiduo','number','step="0.01" min="0"')}</div>
+      <div class="field-row">${inp('Vita utile (anni)','vitaUtile','number','step="0.01" min="0.5"')}${inp('Disponibile e pronto all\'uso dal','dataDisponibilita','date')}</div>
+      ${primo}
+      ${ivaSel}
+      ${sel('Conto del bene (costo)','contoCespite')}
+      ${sel('Conto ammortamento (costo d\'esercizio)','contoAmm')}
+      ${sel('Fondo ammortamento','contoFondo')}
+      ${acquistoBlocco}`;
+  } else {
+    fields = `
+      ${inp('Nome (es. Abbonamento Microsoft 365)','nome','text')}
+      <div class="field"><label>Tipo</label><select data-rf="tipo"><option value="costo" ${f.tipo==='costo'?'selected':''}>Costo</option><option value="ricavo" ${f.tipo==='ricavo'?'selected':''}>Ricavo</option></select></div>
+      <div class="field-row">${inp('Importo €','importo','number','step="0.01" min="0"')}<div class="field"><label>Periodicità</label>${periodSel}</div></div>
+      ${inp('Data prima occorrenza','dataInizio','date')}
+      <div class="field-row">${inp('Data fine (facoltativa)','dataFine','date')}${inp('oppure n° occorrenze','nOccorrenze','number','step="1" min="1"')}</div>
+      ${sel(f.tipo==='ricavo'?'Conto di ricavo':'Conto di costo','contoEconomico')}
+      ${sel('Contropartita (banca, oppure credito/debito)','contropartita')}
+      ${inp('Giorni di dilazione (solo se la contropartita è un credito/debito)','giorniDilazione','number','step="1" min="0"')}
+      ${ivaSel}
+      <div class="competenza-toggle" id="rfComp"><div class="switch ${f.competenza?'on':''}"></div><span>Imposta la competenza sul periodo coperto (utile per abbonamenti pagati in anticipo → ratei/risconti)</span></div>`;
+  }
+  panel.style.display = 'block';
+  panel.innerHTML = `
+    <div class="form-panel-head"><h3>${f.id?'Modifica':'Nuova'} ${f.kind==='rate'?'piano rate':f.kind==='cespite'?'scheda di ammortamento':'costo/ricavo periodico'}</h3><button type="button" class="form-close" id="btnChiudiRicX" title="Chiudi">✕</button></div>
+    ${f.id ? '<div class="note-box" style="background:var(--neutral-soft);color:var(--text-dim);"><span>✎</span><span>Le registrazioni già create restano com\'erano; la modifica vale per le occorrenze non ancora registrate (le registrate restano agganciate per numero d\'ordine).</span></div>' : ''}
+    ${fields}
+    <div class="note-box" id="rfAnteprima" style="background:var(--neutral-soft);color:var(--text-dim);">${anteprimaRicorrenteHTML(f)}</div>
+    <div class="form-actions"><button class="btn primary" id="btnSalvaRic">Salva piano</button><button class="btn" id="btnAnnullaRic">Annulla</button></div>`;
+  panel.querySelectorAll('[data-rf]').forEach(el=>{
+    const handler = e=>{
+      const k = el.dataset.rf; let v = e.target.value;
+      f[k] = (['periodicita'].includes(k)) ? Number(v) : v;
+      if(k==='direzione'){ // propone i conti tipici del caso
+        f.contoPrincipale = v==='credito' ? '12.02' : '23.01'; f.contoInteressi = v==='credito' ? '60.01' : '61.01'; renderRicorrenteForm(); return;
+      }
+      if(k==='preset'){ const p = CESPITE_PRESET[v]; if(p){ f.vitaUtile = p.vita; f.contoCespite = p.cespite; f.contoAmm = p.amm; f.contoFondo = p.fondo; } renderRicorrenteForm(); return; }
+      if(k==='tipo'){ f.contoEconomico = v==='ricavo' ? '50.10' : '31.05'; renderRicorrenteForm(); return; }
+      document.getElementById('rfAnteprima').innerHTML = anteprimaRicorrenteHTML(f);
+    };
+    el.addEventListener(el.tagName==='SELECT' ? 'change' : 'input', handler);
+  });
+  const er = document.getElementById('rfErog'); if(er) er.addEventListener('click', ()=>{ f.includiErogazione = !f.includiErogazione; renderRicorrenteForm(); });
+  const acq = document.getElementById('rfAcq'); if(acq) acq.addEventListener('click', ()=>{ f.registraAcquisto = !f.registraAcquisto; if(f.registraAcquisto && !f.dataAcquisto) f.dataAcquisto = f.dataDisponibilita||''; renderRicorrenteForm(); });
+  const cp = document.getElementById('rfComp'); if(cp) cp.addEventListener('click', ()=>{ f.competenza = !f.competenza; renderRicorrenteForm(); });
+  document.getElementById('btnChiudiRicX').addEventListener('click', chiudiRicorrenteForm);
+  document.getElementById('btnAnnullaRic').addEventListener('click', chiudiRicorrenteForm);
+  document.getElementById('btnSalvaRic').addEventListener('click', salvaRicorrente);
+}
+function salvaRicorrente(){
+  const f = ricorrenteForm; if(!f) return;
+  const err = [];
+  if(!f.nome.trim()) err.push('Inserisci un nome.');
+  if(f.kind==='rate'){
+    if(!(Number(f.capitale)>0)) err.push('Il capitale deve essere maggiore di zero.');
+    if(Number(f.tasso)<0) err.push('Il tasso non può essere negativo.');
+    if(!(Math.floor(Number(f.nRate))>=1)) err.push('Indica il numero di rate.');
+    if(!f.dataPrimaRata) err.push('Indica la data della prima rata.');
+    if(f.includiErogazione && !f.dataErogazione) err.push('Indica la data di erogazione.');
+    if(!f.contoPrincipale || !f.contoBanca || !f.contoInteressi) err.push('Scegli i conti.');
+  } else if(f.kind==='cespite'){
+    if(!(Number(f.costo)>0)) err.push('Il costo storico deve essere maggiore di zero.');
+    if(Number(f.valoreResiduo)<0 || Number(f.valoreResiduo)>=Number(f.costo)) err.push('Il valore residuo deve essere minore del costo.');
+    if(!(Number(f.vitaUtile)>0)) err.push('Indica la vita utile in anni.');
+    if(!f.dataDisponibilita) err.push('Indica da quando il bene è disponibile e pronto all\'uso.');
+    if(!f.contoCespite || !f.contoAmm || !f.contoFondo) err.push('Scegli i conti.');
+    if(f.registraAcquisto && !acquistoCespite(f)){ if(!f.dataAcquisto) err.push('Indica la data di acquisto.'); if(!f.contoAcquisto) err.push('Scegli la contropartita dell\'acquisto.'); }
+  } else {
+    if(!(Number(f.importo)>0)) err.push('L\'importo deve essere maggiore di zero.');
+    if(!f.dataInizio) err.push('Indica la data della prima occorrenza.');
+    if(f.dataFine && f.dataFine < f.dataInizio) err.push('La data di fine precede quella di inizio.');
+    if(!f.contoEconomico || !f.contropartita) err.push('Scegli i conti.');
+  }
+  if(err.length){ alert(err.join('\n')); return; }
+  const rec = Object.assign({}, f, {nome:f.nome.trim()});
+  ['capitale','tasso','nRate','importo','giorniDilazione','costo','valoreResiduo','vitaUtile','ivaAliquota'].forEach(k=>{ if(rec[k]!==undefined && rec[k]!=='') rec[k] = Number(rec[k]); });
+  if(rec.nOccorrenze==='') rec.nOccorrenze = null; else if(rec.nOccorrenze) rec.nOccorrenze = Number(rec.nOccorrenze);
+  STATE.ricorrenti = STATE.ricorrenti || [];
+  if(rec.id){ const i = STATE.ricorrenti.findIndex(x=>x.id===rec.id); if(i>=0) STATE.ricorrenti[i] = rec; }
+  else { rec.id = 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2,5); rec.creatoIl = new Date().toISOString(); STATE.ricorrenti.push(rec); }
+  if(rec.kind==='cespite'){
+    if(f.registraAcquisto && !acquistoCespite(rec)){
+      STATE.movimenti.push(movimentoAcquistoCespite(rec, f.dataAcquisto, f.contoAcquisto));
+    }
+    delete rec.registraAcquisto; delete rec.dataAcquisto;
+  }
+  saveState(); chiudiRicorrenteForm(); renderAll();
+}
+
 document.getElementById('giornaleSearch').addEventListener('input', e=>{
   giornaleState.search = e.target.value;
   renderGiornale();
@@ -4415,7 +4928,7 @@ function classificaEditorHTML(it){
   return `<div class="classifica-editor" data-classifica="${it.codice}">
     ${showScadenza ? `
     <div class="field">
-      <label>Scadenza (per crediti/debiti)</label>
+      <label>Classificazione di default (usata se la registrazione non ha una data di scadenza)</label>
       <select id="cScadenza">
         <option value="" ${!it.scadenza?'selected':''}>Nessuna</option>
         <option value="breve" ${it.scadenza==='breve'?'selected':''}>Breve termine (entro l'esercizio successivo)</option>
@@ -4774,26 +5287,6 @@ function computeSPAsOf(state, asOf){
   return acc;
 }
 
-function scadenzaTotals(acc, idx){
-  let creditiBreve=0, creditiLungo=0, creditiNC=0, debitiBreve=0, debitiLungo=0, debitiNC=0;
-  for(const code in acc){
-    const p = idx[code]; if(!p) continue;
-    const raw = (acc[code].dare||0) - (acc[code].avere||0);
-    if(p.tipo === 'Attivo'){
-      if(raw<=0.005) continue;
-      if(p.scadenza==='lungo') creditiLungo+=raw;
-      else if(p.scadenza==='breve') creditiBreve+=raw;
-      else creditiNC+=raw;
-    } else if(p.tipo === 'Passivo'){
-      const v = -raw;
-      if(v<=0.005) continue;
-      if(p.scadenza==='lungo') debitiLungo+=v;
-      else if(p.scadenza==='breve') debitiBreve+=v;
-      else debitiNC+=v;
-    }
-  }
-  return {creditiBreve,creditiLungo,creditiNC,debitiBreve,debitiLungo,debitiNC};
-}
 
 function computeRateiRisconti(state, asOf){
   const idx = buildPianoIndex(state.piano);
@@ -4981,7 +5474,7 @@ function renderBilancioPeriodo(){
     noteBox.style.display = 'flex';
     noteBox.innerHTML = `<span>ℹ️</span><span>Stato Patrimoniale calcolato dai movimenti registrati: la "foto" dei saldi al <b>${fmtDate(periodEnd)}</b> (somma di tutte le registrazioni da inizio attività fino a questa data).</span>`;
     const acc = computeSPAsOf(STATE, periodEnd);
-    const st = scadenzaTotals(acc, idx);
+    const st = scadenzaTotals(acc, idx, periodEnd, 'bilancio');
     const hasScad = (st.creditiBreve+st.creditiLungo+st.creditiNC+st.debitiBreve+st.debitiLungo+st.debitiNC) > 0.005;
     const rr = accrual ? computeRateiRisconti(STATE, periodEnd) : null;
     const hasRR = rr && (rr.ratAttivi+rr.riscAttivi+rr.ratPassivi+rr.riscPassivi) > 0.005;
@@ -4989,6 +5482,7 @@ function renderBilancioPeriodo(){
       ${hasScad ? `
       <div class="panel">
         <p class="panel-title">Crediti e debiti per scadenza</p>
+        <p class="panel-note" style="margin-top:0;">Breve = esigibile entro il <b>${fmtDate(st.cutoff)}</b> (fine dell'esercizio successivo); lungo = oltre. Usa la data di scadenza delle registrazioni e dei piani rate; dove manca, la classificazione di default del conto.</p>
         <div class="summary-mini">
           <div class="mini-card"><div class="mini-label">Crediti a breve</div><div class="mini-value">${money(st.creditiBreve)}</div></div>
           <div class="mini-card"><div class="mini-label">Crediti a lungo</div><div class="mini-value">${money(st.creditiLungo)}</div></div>
@@ -5175,7 +5669,7 @@ function renderForm(){
           </div>
           <input type="text" class="rrRiclass" list="riclassOptions" placeholder="Etichetta / riclassificazione (opzionale)" value="${(r.riclass||'').replace(/"/g,'&quot;')}">
           <div class="rr-scadenza-field field" style="margin:8px 0 0;display:${rigaHasScadenza(r.codice)?'block':'none'};">
-            <label>Data di scadenza (facoltativa — solo crediti/debiti)</label>
+            <label>Data di scadenza (crediti/debiti: da qui si ricava entro/oltre l'esercizio)</label>
             <input type="date" class="rrScadenza" value="${r.dataScadenza||''}">
           </div>
         </div>
@@ -5790,7 +6284,442 @@ document.getElementById('btnBackup').addEventListener('click', ()=>{
 });
 
 // ---------- init ----------
+// ---------- Impostazioni (IVA, default, dati d'esempio) ----------
+// Fonti: DPR 633/1972 (aliquote 22%, 10%, 5%, 4%); liquidazione periodica mensile (versamento entro il
+// 16 del mese successivo) o trimestrale (16/05, 20/08, 16/11, 16/03 con maggiorazione dell'1% sui primi
+// tre trimestri, contribuenti sotto i limiti di volume d'affari); versamento sotto soglia minima rinviato;
+// acconto IVA il 27/12. Le soglie e i dettagli cambiano: vanno confermati con il commercialista.
+const IVA_ALIQUOTE = [22, 10, 5, 4, 0];
+function impost(){
+  return Object.assign({ivaAttiva:false, aliquotaIva:22, liquidazione:'trimestrale', sogliaIva:100, accontoIva:0}, STATE.impostazioni || {});
+}
+function ivaOn(){ return !!impost().ivaAttiva; }
+function ivaDi(imp, aliq){ return round2((Number(imp)||0) * (Number(aliq)||0) / 100); }
+function ivaAliquotaPiano(r){ return ivaOn() ? (Number(r.ivaAliquota)||0) : 0; }
+
+function giornoLavorativoISO(iso){
+  // sabato/domenica → lunedì successivo (le festività non sono considerate)
+  const [y,m,d] = iso.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m-1, d));
+  while(dt.getUTCDay()===0 || dt.getUTCDay()===6) dt.setUTCDate(dt.getUTCDate()+1);
+  return dt.getUTCFullYear()+'-'+pad2(dt.getUTCMonth()+1)+'-'+pad2(dt.getUTCDate());
+}
+function fineePeriodoIva(iso, mode){
+  const [y,m] = iso.split('-').map(Number);
+  const mm = mode==='mensile' ? m : Math.ceil(m/3)*3;
+  const last = new Date(Date.UTC(y, mm, 0)).getUTCDate();
+  return y+'-'+pad2(mm)+'-'+pad2(last);
+}
+function scadenzaIvaDaFinePeriodo(endISO, mode){
+  const [y,m] = endISO.split('-').map(Number);
+  let yy = y, mm, dd = 16;
+  if(mode==='mensile'){ mm = m+1; if(mm>12){ mm=1; yy++; } if(mm===8) dd = 20; }
+  else { // trimestrale: 31/03→16/05, 30/06→20/08, 30/09→16/11, 31/12→16/03
+    if(m===3) mm = 5; else if(m===6){ mm = 8; dd = 20; } else if(m===9) mm = 11; else { mm = 3; yy++; }
+  }
+  return giornoLavorativoISO(yy+'-'+pad2(mm)+'-'+pad2(dd));
+}
+// Stima dei versamenti IVA futuri: saldo IVA registrato a oggi + IVA delle ricorrenti non ancora registrate.
+function eventiIva(){
+  if(!ivaOn()) return [];
+  const s = impost(), mode = s.liquidazione, today = todayISO(), ev = [];
+  const saldi = computeSaldi(STATE);
+  const debito = -((saldi['25.01'] && saldi['25.01'].raw) || 0);
+  const credito = (saldi['14.05'] && saldi['14.05'].raw) || 0;
+  const base = round2(debito - credito);
+  // scadenze (data → fine periodo) da 18 mesi fa a 30 mesi avanti
+  const dues = [];
+  const [y0,m0] = today.split('-').map(Number);
+  for(let k=-18; k<=30; k++){
+    const t = (m0-1)+k, y = y0+Math.floor(t/12), m = ((t%12)+12)%12+1;
+    const end = fineePeriodoIva(y+'-'+pad2(m)+'-15', mode);
+    const due = scadenzaIvaDaFinePeriodo(end, mode);
+    if(!dues.some(d=>d.due===due)) dues.push({due, end});
+  }
+  dues.sort((a,b)=> a.due<b.due?-1:1);
+  const firstIdx = dues.findIndex(d=>d.due>=today);
+  if(firstIdx<0) return [];
+  const delta = {};
+  for(const r of (STATE.ricorrenti||[])){
+    if(r.kind!=='periodico') continue;
+    const aliq = ivaAliquotaPiano(r); if(!aliq) continue;
+    for(const o of occorrenzeRicorrente(r)){
+      if(occorrenzaGenerata(r,o.n) || (r.saltate||[]).includes(o.n)) continue;
+      const iva = ivaDi(o.importo, aliq);
+      let due = scadenzaIvaDaFinePeriodo(fineePeriodoIva(o.data, mode), mode);
+      if(due < dues[firstIdx].due) due = dues[firstIdx].due;
+      delta[due] = round2((delta[due]||0) + (r.tipo==='ricavo' ? iva : -iva));
+    }
+  }
+  let running = 0;
+  for(let i=firstIdx; i<dues.length; i++){
+    const d = dues[i];
+    const amount = round2(running + (i===firstIdx ? base : 0) + (delta[d.due]||0));
+    if(amount <= 0){ running = amount; continue; }          // credito: riportato
+    const q4 = mode==='trimestrale' && d.end.slice(5,7)==='12';
+    if(amount < (Number(s.sogliaIva)||0) && !q4 && d.due.slice(5,7)!=='12'){ running = amount; continue; } // sotto soglia: rinviato
+    const magg = (mode==='trimestrale' && !q4) ? 0.01 : 0;
+    const tot = round2(amount*(1+magg));
+    ev.push({data:d.due, importo:-tot, tipo:'Pagamento', iva:true,
+      desc:`Versamento IVA ${mode==='mensile'?'mensile':'trimestrale'} (stima${magg?', con maggiorazione 1%':''}) — periodo fino al ${fmtDate(d.end)}`});
+    running = 0;
+  }
+  const acc = Number(s.accontoIva)||0;
+  if(acc>0){
+    const y = today.slice(0,4)+'-12-27' >= today ? today.slice(0,4) : String(Number(today.slice(0,4))+1);
+    ev.push({data:giornoLavorativoISO(y+'-12-27'), importo:-round2(acc), tipo:'Pagamento', iva:true, desc:'Acconto IVA (importo indicato nelle Impostazioni)'});
+  }
+  return ev;
+}
+
+// ---------- Finestra Impostazioni ----------
+function apriImpostazioni(){
+  const s = impost();
+  const nEsempi = (STATE.ricorrenti||[]).filter(r=>r.esempio).length;
+  const box = document.getElementById('settingsBox');
+  box.innerHTML = `
+    <div class="form-panel-head"><h3>Impostazioni</h3><button type="button" class="form-close" id="btnChiudiImp" title="Chiudi">✕</button></div>
+    <h2 class="section-title" style="margin-top:4px;">IVA</h2>
+    <div class="competenza-toggle" id="impIvaToggle"><div class="switch ${s.ivaAttiva?'on':''}"></div><span>Gestisci l'IVA nei ricorrenti, nelle schede dei cespiti e nel calendario di cassa</span></div>
+    <p class="panel-note">Con l'IVA attiva, negli importi dei costi/ricavi periodici inserisci l'<b>imponibile</b>: l'app registra l'IVA a parte (credito IVA 14.05 per gli acquisti, debito 25.01 per le vendite) e stima i versamenti. Con l'IVA spenta tutto resta come prima. Gli interessi dei finanziamenti sono esenti IVA (art. 10 DPR 633/72). Servizi acquistati da fornitori extra-UE (es. alcuni abbonamenti SaaS) seguono altre regole (inversione contabile): lascia 0% e rivedi con il commercialista.</p>
+    <div class="field-row">
+      <div class="field"><label>Aliquota ordinaria predefinita</label><select id="impAliq">${IVA_ALIQUOTE.map(a=>`<option value="${a}" ${Number(s.aliquotaIva)===a?'selected':''}>${a}%</option>`).join('')}</select></div>
+      <div class="field"><label>Liquidazione (trim.: +1% su Q1–Q3)</label><select id="impLiq"><option value="mensile" ${s.liquidazione==='mensile'?'selected':''}>Mensile</option><option value="trimestrale" ${s.liquidazione==='trimestrale'?'selected':''}>Trimestrale</option></select></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Soglia minima di versamento €</label><input type="number" step="1" min="0" id="impSoglia" value="${s.sogliaIva}"></div>
+      <div class="field"><label>Acconto IVA del 27/12 €</label><input type="number" step="0.01" min="0" id="impAcconto" value="${s.accontoIva||0}" placeholder="0"></div>
+    </div>
+    <p class="panel-note">Il regime trimestrale è ammesso sotto i limiti di volume d'affari dell'anno precedente (indicativamente 500.000 € per i servizi); la soglia minima di versamento e le scadenze vanno verificate con il commercialista. Le scadenze che cadono di sabato o domenica sono spostate al lunedì; le festività non sono considerate. L'acconto del 27/12 non si stima da solo (dipende dall'anno precedente): se lo conosci, indicalo qui.</p>
+    <h2 class="section-title">Dati d'esempio</h2>
+    <p class="panel-note">Per provare Ricorrenti, Cassa, Scadenzario e Inventario senza inserire dati veri: carica piani con valori realistici (mutuo chirografario, abbonamenti, canone di assistenza, notebook). Sono segnati <b>ESEMPIO</b>, i prezzi sono segnaposto, e li rimuovi tutti con un clic (le eventuali registrazioni già generate vengono archiviate, non cancellate: art. 2219 c.c.).</p>
+    <div class="form-actions"><button class="btn" id="btnCaricaEsempi">Carica esempi</button><button class="btn danger" id="btnRimuoviEsempi" ${nEsempi?'':'disabled'}>Rimuovi esempi (${nEsempi})</button></div>
+    <div class="form-actions" style="margin-top:14px;"><button class="btn primary" id="btnSalvaImp">Salva</button></div>`;
+  const modal = document.getElementById('settingsModal');
+  modal.style.display = 'flex';
+  const tgl = document.getElementById('impIvaToggle');
+  tgl.addEventListener('click', ()=> tgl.querySelector('.switch').classList.toggle('on'));
+  const chiudi = ()=>{ modal.style.display = 'none'; };
+  document.getElementById('btnChiudiImp').addEventListener('click', chiudi);
+  modal.onclick = e=>{ if(e.target===modal) chiudi(); };
+  document.getElementById('btnSalvaImp').addEventListener('click', ()=>{
+    STATE.impostazioni = {
+      ivaAttiva: tgl.querySelector('.switch').classList.contains('on'),
+      aliquotaIva: Number(document.getElementById('impAliq').value),
+      liquidazione: document.getElementById('impLiq').value,
+      sogliaIva: Math.max(0, Number(document.getElementById('impSoglia').value)||0),
+      accontoIva: Math.max(0, Number(document.getElementById('impAcconto').value)||0),
+    };
+    saveState(); chiudi(); renderAll();
+  });
+  document.getElementById('btnCaricaEsempi').addEventListener('click', ()=>{
+    if(!confirm('Caricare i piani d\'esempio (segnati ESEMPIO) in Ricorrenti?\n\nPotrai rimuoverli tutti insieme dalle Impostazioni.')) return;
+    caricaEsempi(); chiudi(); renderAll(); vaiAGiornaleView('ricorrenti');
+  });
+  document.getElementById('btnRimuoviEsempi').addEventListener('click', ()=>{
+    if(!confirm('Rimuovere tutti i piani d\'esempio? Le registrazioni già generate da essi saranno archiviate (non cancellate).')) return;
+    rimuoviEsempi(); chiudi(); renderAll();
+  });
+}
+
+// ---------- Dati d'esempio (segnaposto realistici) ----------
+// Riferimenti: tasso medio sui nuovi prestiti alle imprese sotto 1 mln € = 4,37% (Banca d'Italia, luglio 2026);
+// Microsoft 365 Business Standard ≈ 14 $/utente/mese dal 1/7/2026; GitHub Team 4 $/utente/mese.
+// I valori in euro sono stime arrotondate: sostituiscili con i contratti reali.
+function caricaEsempi(){
+  const today = todayISO(), anchor = Number(today.slice(8,10));
+  const mk = (o)=> Object.assign({id:'rx'+Date.now().toString(36)+Math.random().toString(36).slice(2,5), esempio:true, saltate:[], creatoIl:new Date().toISOString()}, o);
+  STATE.ricorrenti = STATE.ricorrenti || [];
+  const al = impost().aliquotaIva;
+  STATE.ricorrenti.push(
+    mk({kind:'rate', nome:'Mutuo chirografario (ESEMPIO)', direzione:'debito', capitale:30000, tasso:4.37, nRate:60, periodicita:1,
+        dataPrimaRata:addMonthsISO(today,2,anchor), includiErogazione:true, dataErogazione:addDaysISO(today,7),
+        contoPrincipale:'23.01', contoBanca:'15.01', contoInteressi:'61.01'}),
+    mk({kind:'periodico', nome:'Microsoft 365 Business Standard, 2 utenti (ESEMPIO)', tipo:'costo', importo:25, periodicita:1, dataInizio:addDaysISO(today,10), dataFine:'', nOccorrenze:null,
+        contoEconomico:'31.05', contropartita:'15.01', giorniDilazione:0, competenza:false, ivaAliquota:al}),
+    mk({kind:'periodico', nome:'GitHub Team, 2 utenti (ESEMPIO)', tipo:'costo', importo:7.4, periodicita:1, dataInizio:addDaysISO(today,12), dataFine:'', nOccorrenze:null,
+        contoEconomico:'31.05', contropartita:'15.01', giorniDilazione:0, competenza:false, ivaAliquota:0}),
+    mk({kind:'periodico', nome:'Dominio e hosting annuale (ESEMPIO)', tipo:'costo', importo:120, periodicita:12, dataInizio:addDaysISO(today,20), dataFine:'', nOccorrenze:null,
+        contoEconomico:'31.03', contropartita:'15.01', giorniDilazione:0, competenza:true, ivaAliquota:al}),
+    mk({kind:'periodico', nome:'Commercialista, canone trimestrale (ESEMPIO)', tipo:'costo', importo:450, periodicita:3, dataInizio:addDaysISO(today,25), dataFine:'', nOccorrenze:null,
+        contoEconomico:'31.07', contropartita:'24.01', giorniDilazione:30, competenza:false, ivaAliquota:al}),
+    mk({kind:'periodico', nome:'Canone assistenza cliente Alfa (ESEMPIO)', tipo:'ricavo', importo:500, periodicita:1, dataInizio:addDaysISO(today,15), dataFine:'', nOccorrenze:null,
+        contoEconomico:'50.05', contropartita:'14.01', giorniDilazione:30, competenza:false, ivaAliquota:al}),
+    mk({kind:'cespite', nome:'Notebook sviluppo (ESEMPIO)', preset:'hardware', costo:1500, valoreResiduo:0, vitaUtile:5, dataDisponibilita:today, primoAnno:'meta',
+        contoCespite:'11.01', contoAmm:'38.03', contoFondo:'11.06', ivaAliquota:al, contoAcquisto:'24.01'})
+  );
+  saveState();
+}
+function rimuoviEsempi(){
+  const ids = new Set((STATE.ricorrenti||[]).filter(r=>r.esempio).map(r=>r.id));
+  if(!ids.size) return;
+  for(const m of STATE.movimenti){
+    const o = m.ricorrenteOrigine ? String(m.ricorrenteOrigine).split('|')[0] : (m.cespiteAcquisto||'');
+    if(ids.has(o) && !m.archiviato){ m.archiviato = true; m.archiviatoIl = new Date().toISOString(); }
+  }
+  STATE.ricorrenti = STATE.ricorrenti.filter(r=>!r.esempio);
+  saveState();
+}
+
+// ---------- Acquisto del cespite (registrazione opzionale) ----------
+function acquistoCespite(r){
+  return !!(r.id && STATE.movimenti.some(m=>!m.archiviato && m.cespiteAcquisto===r.id));
+}
+function movimentoAcquistoCespite(r, data, contoAcq){
+  const costo = round2(Number(r.costo)||0), iva = ivaDi(costo, ivaAliquotaPiano(r));
+  const cp = PIANO_INDEX[String(contoAcq)];
+  const righe = [{codice:r.contoCespite, dare:costo, avere:0, riclass:null}];
+  if(iva>0) righe.push({codice:'14.05', dare:iva, avere:0, riclass:null});
+  const rigaCP = {codice:contoAcq, dare:0, avere:round2(costo+iva), riclass:null};
+  if(cp && cp.scadenza) rigaCP.dataScadenza = addDaysISO(data, 30);
+  righe.push(rigaCP);
+  return {id:'m'+(STATE.movimenti.length+1)+'_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,6),
+    data, descrizione:`Acquisto ${r.nome}`, competenzaDal:null, competenzaAl:null, righe, cespiteAcquisto:r.id};
+}
+
+// ---------- Riconciliazione schede ↔ saldi dei conti (Inventario) ----------
+function riconciliazioneCespitiHTML(anno, acc){
+  const schede = (STATE.ricorrenti||[]).filter(r=>r.kind==='cespite' && r.dataDisponibilita && Number(r.dataDisponibilita.slice(0,4))<=anno);
+  if(!schede.length) return '';
+  const costi = {}, fondi = {};
+  for(const r of schede){
+    costi[r.contoCespite] = round2((costi[r.contoCespite]||0) + (Number(r.costo)||0));
+    const occ = occorrenzeCespite(r).filter(o=>o.n<=anno);
+    fondi[r.contoFondo] = round2((fondi[r.contoFondo]||0) + (occ.length ? occ[occ.length-1].fondo : 0));
+  }
+  const saldo = (c, lato)=>{ const a = acc[c]; if(!a) return 0; return round2(lato==='dare' ? (a.dare||0)-(a.avere||0) : (a.avere||0)-(a.dare||0)); };
+  const riga = (code, scheda, libro, nota)=>{
+    const diff = round2(libro - scheda), ok = Math.abs(diff)<0.01;
+    const p = PIANO_INDEX[code];
+    return `<div class="conto-row"><div class="conto-left"><span class="conto-name">${ok?'✓':'⚠️'} ${code} — ${p?p.conto:code}</span><span class="conto-code">schede ${money2(scheda)} · libro ${money2(libro)}${ok?'':' · differenza '+money2(diff)}</span><span class="conto-code">${ok?'':nota}</span></div></div>`;
+  };
+  return `<div class="panel"><p class="panel-title">Riconciliazione immobilizzazioni al 31/12/${anno}</p>
+    ${Object.keys(costi).map(c=>riga(c, costi[c], saldo(c,'dare'), 'Il libro ha più/meno costo delle schede: manca una scheda, o l\'acquisto non è registrato (apri la scheda → Registra acquisto).')).join('')}
+    ${Object.keys(fondi).map(c=>riga(c, fondi[c], saldo(c,'avere'), 'Quote del piano non ancora confermate in Ricorrenti, oppure fondo con altre movimentazioni.')).join('')}
+    <p class="panel-note">Confronto tra quanto prevedono le schede di ammortamento e i saldi dei conti 10.xx/11.xx.</p></div>`;
+}
+
+// ---------- Conti aggiunti dopo la prima versione del piano (migrazione automatica) ----------
+// Le "variazioni delle rimanenze" sono voci di conto economico che compensano le rimanenze
+// finali: B11 (materie prime, sussidiarie, consumo, merci) tra i costi, A2 (prodotti in corso,
+// lavori in corso su ordinazione) tra i ricavi/valore della produzione. Flag `variazione`: nei
+// totali di Riepilogo e Bilancio non contano come fatturato ma come rettifica dei costi.
+const PIANO_EXTRA = [
+  {dopo:'30.04', voce:{codice:'30.05', conto:'Variazione delle rimanenze di materie prime, sussidiarie, di consumo e merci', tipo:'Conto economico', header:false, variazione:true}},
+  {dopo:'50.14', voce:{codice:'50.15', conto:'Variazione delle rimanenze di prodotti in corso e lavori in corso su ordinazione', tipo:'Conto economico', header:false, variazione:true}},
+];
+function ensurePianoAccounts(){
+  for(const ex of PIANO_EXTRA){
+    if(STATE.piano.some(p=>String(p.codice)===ex.voce.codice)) continue;
+    const i = STATE.piano.findIndex(p=>String(p.codice)===ex.dopo);
+    if(i>=0) STATE.piano.splice(i+1, 0, Object.assign({}, ex.voce));
+  }
+}
+
+// ---------- Ammortamento: preset di vita utile (stima civilistica, modificabile) ----------
+// Fonti: OIC 16 (materiali: ammortamento sulla vita utile economica, quote costanti ammesse;
+// nel primo esercizio ammessa metà aliquota se non si discosta dal pro rata temporis), OIC 24
+// (costi di impianto e ampliamento max 5 anni; costi di sviluppo e software 5 anni se la vita utile
+// non è stimabile), DM 31/12/1988 (riferimento fiscale: computer/macchine d'ufficio elettroniche
+// 20%, mobili e macchine ordinarie d'ufficio 12%). La deduzione fiscale è un'altra cosa: qui si
+// calcola l'ammortamento civilistico a bilancio.
+const CESPITE_PRESET = {
+  hardware:{label:'Computer, hardware, macchine elettroniche (20% ≈ 5 anni)', vita:5, cespite:'11.01', amm:'38.03', fondo:'11.06'},
+  mobili:{label:'Mobili e arredi d\'ufficio (12% ≈ 8,33 anni)', vita:8.33, cespite:'11.03', amm:'38.04', fondo:'11.06'},
+  software:{label:'Software di proprietà (5 anni se vita utile non stimabile)', vita:5, cespite:'10.03', amm:'38.02', fondo:'10.07'},
+  sviluppo:{label:'Costi di sviluppo (5 anni se vita utile non stimabile)', vita:5, cespite:'10.02', amm:'38.01', fondo:'10.07'},
+  impianto:{label:'Costi di impianto e ampliamento (max 5 anni)', vita:5, cespite:'10.01', amm:'38.01', fondo:'10.07'},
+  altro:{label:'Altro bene (scegli tu vita utile e conti)', vita:'', cespite:'11.05', amm:'38.05', fondo:'11.06'},
+};
+function giorniAnno(y){ return (y%4===0 && (y%100!==0 || y%400===0)) ? 366 : 365; }
+function occorrenzeCespite(r){
+  const out = [];
+  const costo = Number(r.costo)||0, res = Number(r.valoreResiduo)||0, vita = Number(r.vitaUtile)||0;
+  if(!(costo>res) || !(vita>0) || !r.dataDisponibilita) return out;
+  const base = costo - res, y0 = Number(r.dataDisponibilita.slice(0,4));
+  let cum = 0;
+  for(let y=y0; y<y0+200 && cum < base-0.005; y++){
+    let frac = 1;
+    if(y===y0){
+      if(r.primoAnno==='meta') frac = 0.5;
+      else if(r.primoAnno==='prorata'){
+        const [yy,mm,dd] = r.dataDisponibilita.split('-').map(Number);
+        const giorni = Math.round((new Date(y,11,31) - new Date(yy,mm-1,dd))/86400000) + 1;
+        frac = giorni / giorniAnno(y);
+      }
+    }
+    let q = round2(base/vita*frac);
+    if(cum + q > base - 0.005) q = round2(base - cum);
+    if(q <= 0) break;
+    cum = round2(cum + q);
+    out.push({n:y, data:y+'-12-31', capitale:0, interessi:0, importo:q, fondo:cum, valoreNetto:round2(costo-cum)});
+  }
+  return out;
+}
+function tabellaAmmortamentoHTML(r){
+  const occ = occorrenzeCespite(r);
+  if(!occ.length) return '';
+  return `<details style="margin-top:8px;"><summary style="cursor:pointer;font-size:12.5px;font-weight:700;color:var(--text-dim);min-height:32px;">Piano di ammortamento (${occ.length} esercizi)</summary>
+    <table class="tbl-amm"><thead><tr><th>Anno</th><th>Quota</th><th>Fondo</th><th>Valore netto</th></tr></thead><tbody>
+    ${occ.map(o=>`<tr><td>${o.n}${occorrenzaGenerata(r,o.n)?' ✓':''}</td><td>${money2(o.importo)}</td><td>${money2(o.fondo)}</td><td>${money2(o.valoreNetto)}</td></tr>`).join('')}
+    </tbody></table><p class="panel-note" style="margin:6px 0 0;">✓ = quota già registrata nel giornale. Le quote si propongono al 31/12 di ogni esercizio.</p></details>`;
+}
+
+// ---------- Calendario di cassa ----------
+// Mostra solo l'effetto sulle disponibilità liquide di ciò che è ancora da incassare/pagare:
+// scadenze di crediti e debiti, rate dei piani, erogazioni ancora da registrare e costi/ricavi
+// periodici non ancora registrati. Costi e ricavi "in sé" non compaiono: la loro contropartita
+// finanziaria è già nei conti di liquidità o passa da crediti/debiti (che sono in elenco).
+let cassaMesi = 6;
+function eventiCassa(){
+  const today = todayISO(), ev = [];
+  for(const it of listaScadenze(STATE)){
+    const segno = it.tipo==='credito' ? 1 : -1;
+    const importo = it.fonte==='piano' ? it.rataTotale : it.importo;
+    ev.push({data:it.dataScadenza, importo:segno*importo, desc:it.desc, tipo:it.tipo==='credito'?'Incasso':'Pagamento'});
+  }
+  for(const r of (STATE.ricorrenti||[])){
+    for(const o of occorrenzeRicorrente(r)){
+      if(occorrenzaGenerata(r,o.n) || (r.saltate||[]).includes(o.n)) continue;
+      if(r.kind==='rate' && o.n===0){
+        ev.push({data:o.data, importo:(r.direzione==='credito'?-1:1)*o.capitale, desc:descrizioneOccorrenza(r,o), tipo:r.direzione==='credito'?'Pagamento':'Incasso'});
+      } else if(r.kind==='periodico'){
+        const cp = PIANO_INDEX[String(r.contropartita)];
+        const data = (cp && cp.scadenza) ? addDaysISO(o.data, Number(r.giorniDilazione)||0) : o.data;
+        ev.push({data, importo:(r.tipo==='ricavo'?1:-1)*round2(o.importo+ivaDi(o.importo, ivaAliquotaPiano(r))), desc:descrizioneOccorrenza(r,o), tipo:r.tipo==='ricavo'?'Incasso':'Pagamento'});
+      }
+    }
+  }
+  ev.push(...eventiIva());
+  for(const e of ev) e.arretrato = e.data < today;
+  return ev;
+}
+function calendarioCassa(mesi){
+  const today = todayISO();
+  const r = computeRiepilogo(STATE, computeSaldi(STATE));
+  const start = r.cassa;
+  const [y0,m0] = today.split('-').map(Number);
+  const buckets = [];
+  for(let k=0;k<mesi;k++){
+    const t = (m0-1)+k, y = y0+Math.floor(t/12), m = (t%12)+1;
+    buckets.push({key:y+'-'+pad2(m), label:pad2(m)+'/'+y, entrate:0, uscite:0, eventi:[]});
+  }
+  for(const e of eventiCassa()){
+    const key = e.arretrato ? buckets[0].key : e.data.slice(0,7);
+    const b = buckets.find(x=>x.key===key);
+    if(!b) continue;
+    b.eventi.push(e);
+    if(e.importo>=0) b.entrate += e.importo; else b.uscite += -e.importo;
+  }
+  let saldo = start, min = start, minLabel = 'oggi';
+  for(const b of buckets){
+    b.eventi.sort((a,c)=> a.data<c.data?-1:1);
+    saldo = round2(saldo + b.entrate - b.uscite);
+    b.saldo = saldo;
+    if(saldo < min){ min = saldo; minLabel = b.label; }
+  }
+  return {start, buckets, fine:saldo, min, minLabel};
+}
+function renderCassa(){
+  const container = document.getElementById('cassaBody');
+  const c = calendarioCassa(cassaMesi);
+  const tot = c.buckets.reduce((a,b)=>({e:a.e+b.entrate,u:a.u+b.uscite}),{e:0,u:0});
+  container.innerHTML = `
+    <div class="note-box" style="background:var(--primary-soft);color:var(--primary);"><span>ℹ️</span><span>Previsione delle disponibilità liquide a partire da oggi, basata <b>solo</b> su scadenze di crediti e debiti, rate dei piani e ricorrenti non ancora registrati. Quelle già scadute e non saldate sono contate nel mese corrente. Costi e ricavi non compaiono in sé (sarebbero ridondanti: contano attraverso crediti/debiti e conti di liquidità). Le scadenze senza data non sono previste. ${ivaOn()?`I versamenti IVA sono una <b>stima</b> (liquidazione ${impost().liquidazione}).`:'L\'IVA non è gestita (attivala da ⚙ Impostazioni).'}</span></div>
+    <div class="subtabs" id="cassaHorizon">${[3,6,12,24].map(m=>`<button data-cm="${m}" class="${cassaMesi===m?'active':''}">${m} mesi</button>`).join('')}</div>
+    <div class="summary-mini">
+      <div class="mini-card"><div class="mini-label">Liquidità oggi</div><div class="mini-value">${money(c.start)}</div></div>
+      <div class="mini-card"><div class="mini-label">Entrate previste</div><div class="mini-value">${money(tot.e)}</div></div>
+      <div class="mini-card"><div class="mini-label">Uscite previste</div><div class="mini-value">${money(tot.u)}</div></div>
+      <div class="mini-card"><div class="mini-label">Liquidità a fine periodo</div><div class="mini-value" style="${c.fine<0?'color:var(--danger)':''}">${money(c.fine)}</div></div>
+    </div>
+    ${c.min < 0 ? `<div class="note-box" style="background:var(--danger-soft);color:var(--danger);"><span>⚠️</span><span>La liquidità prevista scende sotto zero (minimo ${money(c.min)} a ${c.minLabel}): servono nuove entrate, un finanziamento o scadenze da rinviare.</span></div>` : ''}
+    ${c.buckets.map(b=>`<details class="panel" style="margin-bottom:8px;" ${b.eventi.length&&b===c.buckets[0]?'open':''}>
+      <summary style="cursor:pointer;display:flex;justify-content:space-between;gap:8px;font-weight:700;min-height:36px;align-items:center;">
+        <span>${b.label}</span><span style="font-size:12.5px;color:var(--text-dim);">+${money(b.entrate)} / −${money(b.uscite)} → <span style="${b.saldo<0?'color:var(--danger)':''}">${money(b.saldo)}</span></span></summary>
+      ${b.eventi.length ? b.eventi.map(e=>`<div class="conto-row"><div class="conto-left"><span class="conto-name">${e.desc}</span><span class="conto-code">${e.arretrato?'⚠️ scaduta il ':''}${fmtDate(e.data)} · ${e.tipo}</span></div><div class="conto-right"><span class="saldo-val" style="${e.importo<0?'color:var(--danger)':''}">${e.importo<0?'−':'+'}${money2(Math.abs(e.importo))}</span></div></div>`).join('') : '<p class="panel-note">Nessun movimento previsto.</p>'}
+    </details>`).join('')}`;
+  container.querySelectorAll('[data-cm]').forEach(b=> b.addEventListener('click', ()=>{ cassaMesi = Number(b.dataset.cm); renderCassa(); }));
+}
+
+// ---------- Inventario (art. 2217 c.c.) e rimanenze (OIC 13) ----------
+// L'inventario comprende l'indicazione e la valutazione delle attività e passività dell'impresa,
+// redatto all'inizio dell'attività e poi ogni anno. Le rimanenze si valutano al minore tra costo
+// e valore di realizzazione desumibile dal mercato (art. 2426 nn. 9-10: FIFO, LIFO o costo medio
+// ponderato) e si rilevano a conto economico come variazione delle rimanenze (B11 / A2).
+let inventarioAnno = new Date().getFullYear();
+let inventarioValori = {}; // valori inventariati digitati, per codice
+const RIMANENZE_CONTI = {'13.01':'50.15', '13.02':'30.05'};
+function renderInventario(){
+  const container = document.getElementById('inventarioBody');
+  const data = inventarioAnno + '-12-31';
+  const acc = computeSPAsOf(STATE, data);
+  const idx = PIANO_INDEX;
+  const saldoDi = code => { const a = acc[code]; return a ? round2((a.dare||0)-(a.avere||0)) : 0; };
+  const righeRim = Object.keys(RIMANENZE_CONTI).map(code=>{
+    const p = idx[code]; if(!p) return '';
+    const contabile = saldoDi(code);
+    const val = inventarioValori[code]!==undefined ? inventarioValori[code] : contabile;
+    return `<div class="riga-editor-row"><div style="font-weight:700;font-size:13.5px;">${code} — ${p.conto}</div>
+      <div class="panel-note" style="margin:0;">Valore a libro al ${fmtDate(data)}: ${money2(contabile)} · variazione verso ${RIMANENZE_CONTI[code]} (${RIMANENZE_CONTI[code]==='50.15'?'A2 lavori/prodotti':'B11 materiali'})</div>
+      <div class="field" style="margin:0;"><label>Valore da inventario (€)</label><input type="number" step="0.01" min="0" data-inv="${code}" value="${val}"></div></div>`;
+  }).join('');
+  const attivi = Object.keys(acc).filter(c=>idx[c] && idx[c].tipo && idx[c].tipo.startsWith('Attivo')).reduce((s,c)=>s+saldoDi(c),0);
+  const passivi = Object.keys(acc).filter(c=>idx[c] && idx[c].tipo && idx[c].tipo.startsWith('Passivo') && !c.startsWith('20.')).reduce((s,c)=>s-saldoDi(c),0);
+  const capitaleEReserve = Object.keys(acc).filter(c=>c.startsWith('20.') && idx[c]).reduce((s,c)=>s-saldoDi(c),0);
+  const cespiti = (STATE.ricorrenti||[]).filter(r=>r.kind==='cespite').map(r=>{
+    const occ = occorrenzeCespite(r).filter(o=>o.n<=inventarioAnno);
+    const fondo = occ.length ? occ[occ.length-1].fondo : 0;
+    return `<div class="conto-row"><div class="conto-left"><span class="conto-name">${r.nome}</span><span class="conto-code">costo ${money2(r.costo)} · fondo piano ${money2(fondo)}</span></div><div class="conto-right"><span class="saldo-val">${money2(round2(r.costo-fondo))}</span></div></div>`;
+  }).join('');
+  container.innerHTML = `
+    <div class="note-box" style="background:var(--primary-soft);color:var(--primary);"><span>ℹ️</span><span>Inventario d'esercizio (art. 2217 c.c.): elenco e valutazione di attività e passività a fine esercizio. Per un'impresa di servizi/software le rimanenze sono di norma modeste (materiali di consumo; lavori in corso su ordinazione per i progetti pluriennali, OIC 23). Il documento va redatto ogni anno e firmato con il bilancio.</span></div>
+    <div class="field-row"><div class="field"><label>Esercizio</label><select id="invAnno">${[0,-1,1,2].map(d=>{const y=new Date().getFullYear()+d;return `<option value="${y}" ${y===inventarioAnno?'selected':''}>${y}</option>`;}).join('')}</select></div></div>
+    <h2 class="section-title">Rimanenze al ${fmtDate(data)}</h2>
+    ${righeRim}
+    <p class="panel-note">Valuta al minore tra costo (FIFO, LIFO o costo medio ponderato) e valore di realizzazione. Alla conferma l'app registra solo la <b>differenza</b> rispetto al valore a libro, con data ${fmtDate(data)}.</p>
+    <button class="btn primary btn-block" id="btnInvGenera">Registra variazioni delle rimanenze…</button>
+    <h2 class="section-title">Attività e passività al ${fmtDate(data)}</h2>
+    <div class="panel"><div class="summary-mini">
+      <div class="mini-card"><div class="mini-label">Totale attività</div><div class="mini-value">${money(attivi)}</div></div>
+      <div class="mini-card"><div class="mini-label">Debiti e altre passività</div><div class="mini-value">${money(passivi)}</div></div>
+      <div class="mini-card"><div class="mini-label">Patrimonio netto (attività − passività)</div><div class="mini-value">${money(attivi-passivi)}</div></div>
+      <div class="mini-card"><div class="mini-label">di cui capitale e riserve registrati</div><div class="mini-value">${money(capitaleEReserve)}</div><div class="mini-sub">Il resto è il risultato non ancora chiuso a capitale</div></div></div></div>
+    <div class="panel"><p class="panel-title">Attività</p>${periodoGroupRowsHTML(acc, idx, t=>t && t.startsWith('Attivo'))}</div>
+    <div class="panel"><p class="panel-title">Passività e patrimonio netto</p>${periodoGroupRowsHTML(acc, idx, t=>t && t.startsWith('Passivo'))}</div>
+    ${cespiti ? `<div class="panel"><p class="panel-title">Immobilizzazioni (schede di ammortamento)</p>${cespiti}<p class="panel-note">Valore netto = costo − fondo secondo il piano; confrontalo con i saldi dei conti 10.xx/11.xx sopra.</p></div>` : ''}
+    ${riconciliazioneCespitiHTML(inventarioAnno, acc)}
+    <button class="btn secondary btn-block" id="btnInvStampa">🖨️ Stampa / salva come PDF</button>`;
+  document.getElementById('invAnno').addEventListener('change', e=>{ inventarioAnno = Number(e.target.value); inventarioValori = {}; renderInventario(); });
+  container.querySelectorAll('[data-inv]').forEach(i=> i.addEventListener('input', e=>{ inventarioValori[e.target.dataset.inv] = e.target.value; }));
+  document.getElementById('btnInvStampa').addEventListener('click', ()=> window.print());
+  document.getElementById('btnInvGenera').addEventListener('click', ()=>{
+    const data = inventarioAnno + '-12-31';
+    const acc = computeSPAsOf(STATE, data);
+    const mov = [];
+    for(const code of Object.keys(RIMANENZE_CONTI)){
+      if(inventarioValori[code]===undefined) continue;
+      const a = acc[code]; const contabile = a ? round2((a.dare||0)-(a.avere||0)) : 0;
+      const delta = round2(Number(inventarioValori[code]) - contabile);
+      if(Math.abs(delta) < 0.005) continue;
+      const v = RIMANENZE_CONTI[code];
+      mov.push({
+        id:'m'+(STATE.movimenti.length+mov.length+1)+'_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,6),
+        data, descrizione:`Rimanenze finali al ${fmtDate(data)} — ${idx[code].conto}`, competenzaDal:null, competenzaAl:null,
+        righe: delta>0 ? [{codice:code,dare:delta,avere:0,riclass:null},{codice:v,dare:0,avere:delta,riclass:null}]
+                       : [{codice:v,dare:-delta,avere:0,riclass:null},{codice:code,dare:0,avere:-delta,riclass:null}],
+        inventarioRimanenze:true,
+      });
+    }
+    if(!mov.length){ alert('Nessuna differenza da registrare: i valori inseriti coincidono con quelli a libro.'); return; }
+    if(!confirm(`Registrare ${mov.length} variazion${mov.length===1?'e':'i'} delle rimanenze al ${fmtDate(data)}?`)) return;
+    STATE.movimenti.push(...mov); inventarioValori = {}; saveState(); renderAll();
+  });
+}
+
 function renderAll(){
+  if(!STATE.ricorrenti) STATE.ricorrenti = [];
+  ensurePianoAccounts();
   rebuildPianoCaches();
   renderHeader();
   renderRiepilogo();
@@ -5799,6 +6728,7 @@ function renderAll(){
   renderPiano(document.getElementById('pianoSearch').value||'');
   renderBilancio();
 }
+document.getElementById('btnImpostazioni').addEventListener('click', apriImpostazioni);
 if(!STATE.modelli) STATE.modelli = [];
 renderAll();
 </script>
